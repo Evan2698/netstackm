@@ -5,7 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
-	"netstack/common"
+
+	"github.com/Evan2698/tun2socks/common"
 )
 
 var (

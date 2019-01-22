@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
-	"netstack/common"
-	"netstack/ipv4"
 	"strconv"
+
+	"github.com/Evan2698/tun2socks/ipv4"
+
+	"github.com/Evan2698/tun2socks/common"
 )
 
 // UDP ...
