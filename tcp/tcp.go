@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"netstack/common"
+	"net"
+
+	"github.com/Evan2698/chimney/utils"
+
+	"github.com/Evan2698/tun2socks/common"
+	"github.com/Evan2698/tun2socks/ipv4"
 )
 
 // TCP ..
@@ -34,6 +39,11 @@ type TCP struct {
 	Options []*TCPOption
 
 	Payload []byte // payload
+
+	SrcIP net.IP //
+	DstIP net.IP
+
+	Stop bool
 }
 
 // TryParse ...
@@ -198,7 +208,11 @@ func (t *TCP) ToBytes() []byte {
 	t.Sum = common.CalculateSum(header)
 	binary.BigEndian.PutUint16(header[16:], t.Sum)
 
-	return append(header, t.Payload...)
+	var outX bytes.Buffer
+	outX.Write(header)
+	outX.Write(t.Payload)
+
+	return outX.Bytes()
 
 }
 
@@ -229,4 +243,23 @@ func (t *TCP) CopyHeaderFrom(tcp *TCP) {
 
 func newtcp() *TCP {
 	return &TCP{}
+}
+
+// ParseTCP ..
+func ParseTCP(ippkg *ipv4.IPv4) (*TCP, error) {
+
+	tcp := newtcp()
+	err := tcp.TryParse(ippkg.PayLoad)
+	if err != nil {
+		utils.LOG.Print("parse tcp failed: ", err)
+		return nil, err
+	}
+	tcp.SrcIP = ippkg.SrcIP
+	tcp.DstIP = ippkg.DstIP
+	return tcp, nil
+}
+
+// IsStop ..
+func (t *TCP) IsStop() bool {
+	return t.Stop
 }

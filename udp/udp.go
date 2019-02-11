@@ -19,6 +19,7 @@ type UDP struct {
 	Length   uint16
 	Checksum uint16
 	Payload  []byte
+	Stop     bool
 }
 
 // TryParse ..
@@ -86,4 +87,9 @@ func (t *UDP) buildPseudoHeader(src, dst net.IP) []byte {
 	out.WriteByte(uint8(t.Length >> 8))
 	out.WriteByte(uint8(t.Length & 0xff))
 	return out.Bytes()
+}
+
+// IsStop ...
+func (t *UDP) IsStop() bool {
+	return t.Stop
 }

@@ -1,6 +1,7 @@
 package ipv4
 
 import (
+	"bytes"
 	"container/list"
 	"sync"
 	"time"
@@ -14,8 +15,9 @@ const (
 )
 
 type fragment struct {
-	payload *IPv4
-	tick    int
+	fraglist *list.List
+	id       uint16
+	tick     int
 }
 
 type fragmap struct {
@@ -52,9 +54,66 @@ func (m *fragmap) delete(id uint16) *fragment {
 func (m *fragmap) add(pkg *IPv4) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	m.frag[pkg.Identification] = &fragment{
-		payload: pkg,
-		tick:    MAXTICKS,
+
+	var f *fragment
+	var ok bool
+
+	f, ok = m.frag[pkg.Identification]
+	if !ok {
+		f = &fragment{
+			fraglist: list.New(),
+			tick:     MAXTICKS,
+			id:       pkg.Identification,
+		}
+		m.frag[pkg.Identification] = f
+	}
+
+	insertfrag(pkg, f)
+
+}
+
+// GetHugPkg ..
+func GetHugPkg(id uint16) *IPv4 {
+
+	var payload bytes.Buffer
+
+	f := thisfrag.getfrag(id)
+	if f == nil {
+		return nil
+	}
+
+	tmp := &IPv4{}
+	for e := f.fraglist.Front(); e != nil; e = e.Next() {
+		if one, ok := e.Value.(*IPv4); ok {
+			payload.Write(one.PayLoad)
+			tmp.CopyHeaderFrom(one)
+		}
+	}
+	tmp.PayLoad = payload.Bytes()
+
+	defer func() {
+		thisfrag.delete(id)
+		destoryFragment(f)
+	}()
+	tmp.Length = 0xff // huge flag
+	return tmp
+}
+
+func insertfrag(pkg *IPv4, f *fragment) {
+
+	var mark *list.Element
+	for e := f.fraglist.Front(); e != nil; e = e.Next() {
+		one, _ := e.Value.(*IPv4)
+		if pkg.FragmentOffset < one.FragmentOffset {
+			mark = e
+			break
+		}
+	}
+	if mark != nil {
+		f.fraglist.InsertBefore(pkg, mark)
+
+	} else {
+		f.fraglist.PushBack(pkg)
 	}
 }
 
@@ -65,13 +124,20 @@ func Merge(pkg *IPv4) bool {
 	this := thisfrag.getfrag(pkg.Identification)
 	if this != nil {
 		finish = ((pkg.Flags & 0x1) == 0)
-		this.payload.PayLoad = append(this.payload.PayLoad, pkg.PayLoad...)
-		this.payload.CopyHeaderFrom(pkg)
-	} else {
-		thisfrag.add(pkg)
 	}
-
+	thisfrag.add(pkg)
 	return finish
+}
+
+// destoryFragment ..
+func destoryFragment(who *fragment) {
+	for begin := who.fraglist.Front(); begin != nil; begin = begin.Next() {
+		var pkg *IPv4
+		pkg, _ = begin.Value.(*IPv4)
+		if pkg != nil {
+			pkg.Close()
+		}
+	}
 }
 
 func kd() {
@@ -90,11 +156,11 @@ func kd() {
 		for e := l.Front(); e != nil; e = e.Next() {
 			var f *fragment
 			f, _ = e.Value.(*fragment)
-			who := thisfrag.delete(f.payload.Identification)
+			who := thisfrag.delete(f.id)
 			if who != nil {
-				who.payload.Close()
+				destoryFragment(who)
 			}
-			utils.LOG.Println("ip package wait timeout:  id=", f.payload.Identification)
+			utils.LOG.Println("ip package wait timeout:  id=", f.id)
 		}
 		time.Sleep(time.Minute * 1)
 	}

@@ -35,6 +35,9 @@ func (o *TCPOption) FromBytes(op []byte) error {
 	} else {
 		o.Length = op[1]
 		o.Data = op[2:o.Length]
+		if len(o.Data) == 0 {
+			o.Data = nil
+		}
 	}
 	return nil
 }

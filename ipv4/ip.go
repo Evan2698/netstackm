@@ -5,6 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"sync/atomic"
+
+	"github.com/Evan2698/chimney/utils"
 
 	"github.com/Evan2698/tun2socks/common"
 )
@@ -39,6 +42,7 @@ type IPv4ReaderWriter interface {
 	TryParseBody([]byte) error
 	ToBytes() []byte
 	Close()
+	IsStop() bool
 }
 
 // TryParseBasicHeader ..
@@ -205,4 +209,25 @@ func (ip *IPv4) CopyHeaderFrom(it *IPv4) {
 	ip.SrcIP = it.SrcIP
 	ip.DstIP = it.DstIP
 	ip.Options = it.Options
+}
+
+// IsStop ..
+func (ip *IPv4) IsStop() bool {
+	return ip.Version == 0xff
+}
+
+// Dump ...
+func Dump(ip *IPv4) {
+	utils.LOG.Println("src IP: ", ip.SrcIP.To4().String())
+	utils.LOG.Println("dst IP: ", ip.DstIP.To4().String())
+	utils.LOG.Println("id: ", ip.Identification)
+	utils.LOG.Println("Flags: ", ip.Flags)
+	utils.LOG.Println("Length: ", ip.Length)
+}
+
+var globalIPID uint32
+
+//GeneratorIPID ...
+func GeneratorIPID() uint16 {
+	return uint16(atomic.AddUint32(&globalIPID, 1) & 0x0000ffff)
 }
