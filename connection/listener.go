@@ -1,8 +1,8 @@
 package connection
 
 import (
-	"net"
 	"os"
+	"syscall"
 
 	"github.com/Evan2698/chimney/utils"
 
@@ -30,13 +30,13 @@ type listen struct {
 
 func (l *listen) Bind(fd int) error {
 
-	f := os.NewFile((uintptr)(fd), "")
-	filecon, err := net.FileConn(f)
+	err := syscall.SetNonblock(fd, true)
 	if err != nil {
-		utils.LOG.Println("create file connection failed, ", err)
+		utils.LOG.Println("SetNonblock failed, ", err)
 		return err
 	}
-	l.r = newReactor(filecon)
+	f := os.NewFile(uintptr(fd), "")
+	l.r = newReactor(f)
 	go l.r.Run()
 	return nil
 }

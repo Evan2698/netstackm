@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"io"
 	"net"
 	"time"
 
@@ -36,7 +37,7 @@ type ConnectManager interface {
 }
 
 type reactor struct {
-	tun     net.Conn
+	tun     io.ReadWriteCloser
 	writeCh chan ipv4.IPv4ReaderWriter
 	tcp     ConnectManager
 	udp     ConnectManager
@@ -58,16 +59,15 @@ func (r *reactor) Run() {
 		}
 	}()
 
-	var header = make([]byte, 20)
 	for {
-
-		n, err := r.tun.Read(header)
+		var full = make([]byte, ipv4.MTU)
+		n, err := r.tun.Read(full)
 		if err != nil {
 			utils.LOG.Println("read from tun device failed!", err, n)
 		}
 
 		pkg := &ipv4.IPv4{}
-		err = pkg.TryParseBasicHeader(header)
+		err = pkg.TryParseBasicHeader(full[:20])
 		if err != nil {
 			utils.LOG.Println("parse ip header failed", err)
 			continue
@@ -78,14 +78,7 @@ func (r *reactor) Run() {
 			break
 		}
 
-		buf := make([]byte, pkg.Length)
-		n, err = r.tun.Read(buf)
-		if err != nil {
-			utils.LOG.Println("read conntent failed", err)
-			continue
-		}
-
-		err = pkg.TryParseBody(buf[:n])
+		err = pkg.TryParseBody(full[20:n])
 		if err != nil {
 			utils.LOG.Println("parse ip body failed", err)
 			continue
@@ -96,7 +89,7 @@ func (r *reactor) Run() {
 			break
 		}
 
-		if pkg.Flags&0x1 != 0 || pkg.FragmentOffset != 0 {
+		if (pkg.Flags&0x1) != 0 || pkg.FragmentOffset != 0 {
 
 			finish := ipv4.Merge(pkg)
 			if !finish {
@@ -168,7 +161,7 @@ func (r *reactor) Waitudp() (NetConnect, error) {
 	return r.udp.WaitConnect()
 }
 
-func newReactor(t net.Conn) netStackReactor {
+func newReactor(t io.ReadWriteCloser) netStackReactor {
 	r := &reactor{
 		tun:     t,
 		writeCh: make(chan ipv4.IPv4ReaderWriter, 100),
