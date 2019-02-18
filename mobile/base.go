@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/Evan2698/chimney/utils"
 	"github.com/Evan2698/netstackm/netcore"
@@ -136,6 +137,10 @@ func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 		if err != nil {
 			utils.LOG.Println("read udp from tun failed", err)
 			break
+		}
+
+		if strings.Contains(c.RemoteAddr().String(), dns) {
+
 		}
 
 		v := packUDPHeader(buf[:n], c.RemoteAddr())
