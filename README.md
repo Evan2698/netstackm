@@ -1,2 +1,2 @@
-# tun2socks
+# netstackm
 sample netstack for android or ios 
