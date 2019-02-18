@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Evan2698/chimney/utils"
+	"github.com/Evan2698/netstackm/dns"
 	"github.com/Evan2698/netstackm/netcore"
 	"golang.org/x/net/proxy"
 )
@@ -102,6 +103,8 @@ func handTCPConnection(c *netcore.Connection, url string) {
 
 }
 
+var gcache = dns.NewDNSCache()
+
 func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 	defer c.Close()
 
@@ -121,7 +124,9 @@ func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 				utils.LOG.Println("read udp from proxy failed", err)
 				break
 			}
-
+			if strings.Contains(c.RemoteAddr().String(), dns) {
+				gcache.Store(hello[:n])
+			}
 			_, err = c.Write(hello[:n])
 			if err != nil {
 				utils.LOG.Println("write udp to tun failed", err)
@@ -140,7 +145,17 @@ func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 		}
 
 		if strings.Contains(c.RemoteAddr().String(), dns) {
-
+			answer := gcache.Query(buf[:n])
+			if answer != nil {
+				data, e := answer.PackBuffer(buf[:])
+				if e == nil {
+					go func() {
+						_, er := c.Write(data)
+						utils.LOG.Print("write dns response: ", er)
+					}()
+					return
+				}
+			}
 		}
 
 		v := packUDPHeader(buf[:n], c.RemoteAddr())
