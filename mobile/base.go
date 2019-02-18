@@ -113,34 +113,35 @@ func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 	defer con.Close()
 
 	go func() {
-		buf := make([]byte, 4000)
+		hello := make([]byte, 4096)
 		for {
-			n, err := c.Read(buf)
+			n, err := con.Read(hello)
 			if err != nil {
-				utils.LOG.Println("read udp from tun failed", err)
+				utils.LOG.Println("read udp from proxy failed", err)
 				break
 			}
 
-			v := packUDPHeader(buf[:n], c.RemoteAddr())
-			_, err = con.Write(v)
+			_, err = c.Write(hello[:n])
 			if err != nil {
-				utils.LOG.Println("write udp to proxy failed", err)
+				utils.LOG.Println("write udp to tun failed", err)
 				break
 			}
 		}
+
 	}()
 
-	hello := make([]byte, 4096)
+	buf := make([]byte, 4000)
 	for {
-		n, err := con.Read(hello)
+		n, err := c.Read(buf)
 		if err != nil {
-			utils.LOG.Println("read udp from proxy failed", err)
+			utils.LOG.Println("read udp from tun failed", err)
 			break
 		}
 
-		_, err = c.Write(hello[:n])
+		v := packUDPHeader(buf[:n], c.RemoteAddr())
+		_, err = con.Write(v)
 		if err != nil {
-			utils.LOG.Println("write udp to tun failed", err)
+			utils.LOG.Println("write udp to proxy failed", err)
 			break
 		}
 	}
