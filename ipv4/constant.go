@@ -22,3 +22,7 @@ const (
 	// SCTP Stream Control Transmission Protocol
 	SCTP = 0x84
 )
+
+const (
+	MTU = 1500
+)

@@ -3,6 +3,8 @@ package tcp
 import (
 	"bytes"
 	"errors"
+
+	"github.com/Evan2698/chimney/utils"
 )
 
 // TCPOption ...
@@ -52,4 +54,20 @@ func (o *TCPOption) ToBytes() []byte {
 		outb.Write(o.Data)
 	}
 	return outb.Bytes()
+}
+
+// NewTCPOption ...
+func NewTCPOption() *TCPOption {
+
+	return &TCPOption{}
+}
+
+// Dump ...
+func (o *TCPOption) Dump() {
+	utils.LOG.Println("==========================")
+	utils.LOG.Println("type: ", o.Type)
+	utils.LOG.Println("length: ", o.Length)
+	utils.LOG.Println("DATA: ", o.Data)
+	utils.LOG.Println("==========================")
+
 }

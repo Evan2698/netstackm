@@ -8,8 +8,8 @@ import (
 
 	"github.com/Evan2698/chimney/utils"
 
-	"github.com/Evan2698/tun2socks/common"
-	"github.com/Evan2698/tun2socks/ipv4"
+	"github.com/Evan2698/netstackm/common"
+	"github.com/Evan2698/netstackm/ipv4"
 )
 
 // TCP ..
@@ -241,14 +241,15 @@ func (t *TCP) CopyHeaderFrom(tcp *TCP) {
 	t.Options = tcp.Options
 }
 
-func newtcp() *TCP {
+// Newtcp ...
+func Newtcp() *TCP {
 	return &TCP{}
 }
 
 // ParseTCP ..
 func ParseTCP(ippkg *ipv4.IPv4) (*TCP, error) {
 
-	tcp := newtcp()
+	tcp := Newtcp()
 	err := tcp.TryParse(ippkg.PayLoad)
 	if err != nil {
 		utils.LOG.Print("parse tcp failed: ", err)
@@ -262,4 +263,17 @@ func ParseTCP(ippkg *ipv4.IPv4) (*TCP, error) {
 // IsStop ..
 func (t *TCP) IsStop() bool {
 	return t.Stop
+}
+
+func (t *TCP) Dump() {
+	utils.LOG.Println("-----------------------------------------")
+	utils.LOG.Println("src", t.SrcIP.String(), ":", t.SrcPort, "<->", t.DstIP.String(), ":", t.DstPort)
+	utils.LOG.Println("Sequence", t.Sequence, ":", "Acknowledgment", t.Acknowledgment)
+	utils.LOG.Println("offset", t.Offset, ":", "NS", t.NS)
+	utils.LOG.Println("CWR", t.CWR, ":", "ECE", t.ECE, ":", "URG", t.URG, ":ACK", t.ACK, ":PSH", t.PSH, ":RST", t.RST, ":SYN", t.SYN, ":FIN", t.FIN)
+	utils.LOG.Println("WSIZE", t.WndSize, ":CHECKSUM", t.Sum, ":", "urgent", t.Urgent)
+	for _, k := range t.Options {
+		k.Dump()
+	}
+	utils.LOG.Println("-----------------------------------------")
 }

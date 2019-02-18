@@ -9,12 +9,11 @@ import (
 
 	"github.com/Evan2698/chimney/utils"
 
-	"github.com/Evan2698/tun2socks/common"
+	"github.com/Evan2698/netstackm/common"
 )
 
-var (
-	//MTU  package size
-	MTU = 1500
+const (
+	stopmark = "11.11.11.11"
 )
 
 // IPv4 ..
@@ -28,7 +27,7 @@ type IPv4 struct {
 	Flags          uint8           // Flags 3 bits
 	FragmentOffset uint16          // Fragment Offset 13 bits
 	TTL            uint8           // Time to Live 8 bits
-	Protocol       uint8           // protocol  8bits
+	Protocol       IPProtocol      // protocol  8bits
 	Sum            uint16          // Header Checksum
 	SrcIP          net.IP          // source ip address 4 bytes
 	DstIP          net.IP          // destination ip address 4 bytes
@@ -66,7 +65,7 @@ func (ip *IPv4) TryParseBasicHeader(co []byte) error {
 
 	ip.TTL = co[8]
 
-	ip.Protocol = co[9]
+	ip.Protocol = IPProtocol(co[9])
 
 	ip.Sum = (uint16(co[10]) << 8) + uint16(co[11])
 
@@ -166,7 +165,7 @@ func (ip *IPv4) ToBytes() []byte {
 
 	con.WriteByte(ip.TTL)
 
-	con.WriteByte(ip.Protocol)
+	con.WriteByte(byte(ip.Protocol))
 
 	con.Write([]byte{0, 0})
 	con.Write(ip.SrcIP.To4())
@@ -213,16 +212,19 @@ func (ip *IPv4) CopyHeaderFrom(it *IPv4) {
 
 // IsStop ..
 func (ip *IPv4) IsStop() bool {
-	return ip.Version == 0xff
+	return ip.Version == 0xff ||
+		ip.DstIP.To4().String() == stopmark
 }
 
 // Dump ...
-func Dump(ip *IPv4) {
+func (ip *IPv4) Dump() {
 	utils.LOG.Println("src IP: ", ip.SrcIP.To4().String())
 	utils.LOG.Println("dst IP: ", ip.DstIP.To4().String())
 	utils.LOG.Println("id: ", ip.Identification)
 	utils.LOG.Println("Flags: ", ip.Flags)
 	utils.LOG.Println("Length: ", ip.Length)
+	utils.LOG.Println("protocol: ", ip.Protocol.String())
+	utils.LOG.Println("length of payload: ", len(ip.PayLoad))
 }
 
 var globalIPID uint32
@@ -230,4 +232,9 @@ var globalIPID uint32
 //GeneratorIPID ...
 func GeneratorIPID() uint16 {
 	return uint16(atomic.AddUint32(&globalIPID, 1) & 0x0000ffff)
+}
+
+// NewIPv4 ...
+func NewIPv4() *IPv4 {
+	return &IPv4{}
 }

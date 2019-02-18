@@ -7,26 +7,30 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/Evan2698/tun2socks/ipv4"
+	"github.com/Evan2698/chimney/utils"
+	"github.com/Evan2698/netstackm/ipv4"
 
-	"github.com/Evan2698/tun2socks/common"
+	"github.com/Evan2698/netstackm/common"
 )
 
 // UDP ...
 type UDP struct {
-	SrcPort  uint16
-	DstPort  uint16
-	Length   uint16
-	Checksum uint16
-	Payload  []byte
-	Stop     bool
+	SrcPort      uint16
+	DstPort      uint16
+	Length       uint16
+	Checksum     uint16
+	Payload      []byte
+	Stop         bool
+	SrcIP, DstIP net.IP
 }
 
 // TryParse ..
-func (t *UDP) TryParse(b []byte) error {
+func TryParse(ip *ipv4.IPv4) (*UDP, error) {
+	t := NewUDP()
+	b := ip.PayLoad
 
 	if len(b) < 8 {
-		return errors.New("payload too small for UDP:" + strconv.Itoa(len(b)) + " bytes")
+		return nil, errors.New("payload too small for UDP:" + strconv.Itoa(len(b)) + " bytes")
 	}
 
 	t.SrcPort = binary.BigEndian.Uint16(b[0:2])
@@ -39,11 +43,14 @@ func (t *UDP) TryParse(b []byte) error {
 		t.Payload = nil
 	}
 
-	return nil
+	t.SrcIP = ip.SrcIP
+	t.DstIP = ip.DstIP
+
+	return nil, nil
 }
 
 // ToBytes ..
-func (t *UDP) ToBytes(src, dst net.IP) []byte {
+func (t *UDP) ToBytes() []byte {
 	tmp := make([]byte, 2)
 	var out bytes.Buffer
 
@@ -62,7 +69,7 @@ func (t *UDP) ToBytes(src, dst net.IP) []byte {
 	out.Write(t.Payload)
 	co := out.Bytes()
 
-	t.Checksum = common.CalculateSum(t.buildchecksumcontent(src, dst, co))
+	t.Checksum = common.CalculateSum(t.buildchecksumcontent(t.SrcIP, t.DstIP, co))
 
 	binary.BigEndian.PutUint16(co[6:], t.Checksum)
 
@@ -92,4 +99,16 @@ func (t *UDP) buildPseudoHeader(src, dst net.IP) []byte {
 // IsStop ...
 func (t *UDP) IsStop() bool {
 	return t.Stop
+}
+
+// NewUDP ..
+func NewUDP() *UDP {
+	return &UDP{}
+}
+
+// Dump ..
+func (t *UDP) Dump() {
+	utils.LOG.Println("----------------UDP---------------")
+	utils.LOG.Println("src", t.SrcIP.String(), ":", t.SrcPort, "<->", t.DstIP.String(), ":", t.DstPort)
+	utils.LOG.Println("----------------UDP---------------")
 }
