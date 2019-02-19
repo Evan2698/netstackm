@@ -61,10 +61,10 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 
 	state := c.current
 	if len(c.buffer) > 0 {
+		state.Mutex.Lock()
 		n := copy(b, c.buffer[:])
 		c.buffer = c.buffer[n:]
 
-		state.Mutex.Lock()
 		state.recvWindow = state.recvWindow + uint32(n)
 		state.recvWindow = state.recvWindow & 0xffff
 		if state.recvWindow < ipv4.MTU {
@@ -84,11 +84,10 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 			// connection closed?
 			return 0, io.EOF
 		}
-
+		state.Mutex.Lock()
 		n := copy(b[:], c.buffer[:])
 		c.buffer = c.buffer[n:]
 
-		state.Mutex.Lock()
 		state.recvWindow = state.recvWindow + uint32(n)
 		state.recvWindow = state.recvWindow & 0xffff
 		if state.recvWindow < ipv4.MTU {
@@ -347,11 +346,10 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 	}
 
 	state := c.current
-
 	pl := len(t.Payload)
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+
 	if pl > 0 {
+		state.Mutex.Lock()
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
@@ -359,16 +357,19 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
+		state.Mutex.Unlock()
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
 		}
 	}
 	if t.FIN {
+		state.Mutex.Lock()
 		state.RecvNext = state.RecvNext + 1
 		r := finAck(state)
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SocketState = SocketLastAck
+		state.Mutex.Unlock()
 	}
 }
 
@@ -396,10 +397,11 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 
 	pl := len(t.Payload)
 	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
 	state.SocketState = SocketEstablished
+	state.Mutex.Unlock()
 	c.Stack.a <- c
 	if pl > 0 {
+		state.Mutex.Lock()
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
@@ -407,6 +409,7 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
+		state.Mutex.Unlock()
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
@@ -426,7 +429,9 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 
 //Close ...
 func (c *Connection) Close() {
-
+	state := c.current
+	state.Mutex.Lock()
+	defer state.Mutex.Unlock()
 	t := tcp.Newtcp()
 	c.input <- t
 	t.Stop = true

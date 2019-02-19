@@ -47,9 +47,13 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 		return 0, errors.New("UDP Closed")
 	}
 
+	state := c.current
+
 	if len(c.buffer) > 0 {
+		state.Mutex.Lock()
 		n := copy(b, c.buffer[:])
 		c.buffer = c.buffer[n:]
+		state.Mutex.Unlock()
 		return n, nil
 	}
 
@@ -62,9 +66,10 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 			// connection closed?
 			return 0, io.EOF
 		}
-
+		state.Mutex.Lock()
 		n := copy(b[:], c.buffer[:])
 		c.buffer = c.buffer[n:]
+		state.Mutex.Unlock()
 		return n, nil
 	}
 }
@@ -183,14 +188,16 @@ func (c *UDPConnection) run() {
 
 			pl := len(t.Payload)
 			state := c.current
-			state.Mutex.Lock()
-			defer state.Mutex.Unlock()
+
 			if pl > 0 {
+				state.Mutex.Lock()
 				state.Connu.buffer = append(state.Connu.buffer, t.Payload[:]...)
+				state.Mutex.Unlock()
 				select {
 				case state.Conn.Recv <- []byte{}:
 				default:
 				}
+
 			}
 		case <-timeout.C:
 			c.handleClose()
