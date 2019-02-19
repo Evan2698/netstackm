@@ -50,10 +50,10 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 	state := c.current
 
 	if len(c.buffer) > 0 {
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		n := copy(b, c.buffer[:])
 		c.buffer = c.buffer[n:]
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 		return n, nil
 	}
 
@@ -66,10 +66,10 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 			// connection closed?
 			return 0, io.EOF
 		}
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		n := copy(b[:], c.buffer[:])
 		c.buffer = c.buffer[n:]
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 		return n, nil
 	}
 }
@@ -162,8 +162,8 @@ func (c *UDPConnection) Open(t *udp.UDP) error {
 		utils.LOG.Println("can not create state ", err)
 		return err
 	}
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	c.current = state
 
 	go c.run()
@@ -190,11 +190,11 @@ func (c *UDPConnection) run() {
 			state := c.current
 
 			if pl > 0 {
-				state.Mutex.Lock()
+				state.lockObject.Lock()
 				state.Connu.buffer = append(state.Connu.buffer, t.Payload[:]...)
-				state.Mutex.Unlock()
+				state.lockObject.Unlock()
 				select {
-				case state.Conn.Recv <- []byte{}:
+				case state.Connu.Recv <- []byte{}:
 				default:
 				}
 			}

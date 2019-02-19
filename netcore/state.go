@@ -12,7 +12,7 @@ const (
 )
 
 type State struct {
-	sync.Mutex
+	lockObject sync.Mutex
 
 	SrcIP    net.IP
 	SrcPort  uint16

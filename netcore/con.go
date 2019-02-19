@@ -61,7 +61,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 
 	state := c.current
 	if len(c.buffer) > 0 {
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		n := copy(b, c.buffer[:])
 		c.buffer = c.buffer[n:]
 
@@ -70,7 +70,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 		if state.recvWindow < ipv4.MTU {
 			state.recvWindow = 64420
 		}
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 
 		return n, nil
 	}
@@ -84,7 +84,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 			// connection closed?
 			return 0, io.EOF
 		}
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		n := copy(b[:], c.buffer[:])
 		c.buffer = c.buffer[n:]
 
@@ -93,7 +93,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 		if state.recvWindow < ipv4.MTU {
 			state.recvWindow = 64420
 		}
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 
 		return n, nil
 	}
@@ -109,8 +109,8 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 
 	state := c.current
 
-	state.Lock()
-	defer state.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 
 	sz := len(b)
 	rest := b
@@ -162,8 +162,8 @@ func (c *Connection) Open(t *tcp.TCP) error {
 		utils.LOG.Println("can not create state ", err)
 		return err
 	}
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	c.current = state
 	x := synack(state)
 	v := packtcp(x)
@@ -226,8 +226,8 @@ func (c *Connection) run() {
 }
 func (c *Connection) updateWindow(t *tcp.TCP) {
 	state := c.current
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	state.sendWindow = uint32(t.WndSize)
 }
 
@@ -243,8 +243,8 @@ func (c *Connection) handleLastAck(t *tcp.TCP) {
 		return
 	}
 
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	state.SocketState = SocketClosed
 	c.notifyclose()
 }
@@ -264,8 +264,8 @@ func (c *Connection) handleClosing(t *tcp.TCP) {
 	if !t.ACK {
 		return
 	}
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	state.SocketState = SocketTimeWait
 }
 
@@ -284,8 +284,8 @@ func (c *Connection) handleFinWait2(t *tcp.TCP) {
 		return
 	}
 
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	state.RecvNext = state.RecvNext + 1
 	r := ack(c.current)
 	c.Stack.sendtolow(packtcp(r), true)
@@ -307,8 +307,8 @@ func (c *Connection) handleFinWait1(t *tcp.TCP) {
 	}
 
 	state := c.current
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	if t.FIN {
 		state.SendNext = state.SendNext + 1
 		r := ack(c.current)
@@ -349,7 +349,7 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 	pl := len(t.Payload)
 
 	if pl > 0 {
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
@@ -357,19 +357,19 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
 		}
 	}
 	if t.FIN {
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + 1
 		r := finAck(state)
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SocketState = SocketLastAck
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 	}
 }
 
@@ -396,12 +396,12 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 	}
 
 	pl := len(t.Payload)
-	state.Mutex.Lock()
+	state.lockObject.Lock()
 	state.SocketState = SocketEstablished
-	state.Mutex.Unlock()
+	state.lockObject.Unlock()
 	c.Stack.a <- c
 	if pl > 0 {
-		state.Mutex.Lock()
+		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
@@ -409,7 +409,7 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
-		state.Mutex.Unlock()
+		state.lockObject.Unlock()
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
@@ -430,8 +430,8 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 //Close ...
 func (c *Connection) Close() {
 	state := c.current
-	state.Mutex.Lock()
-	defer state.Mutex.Unlock()
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	t := tcp.Newtcp()
 	c.input <- t
 	t.Stop = true
