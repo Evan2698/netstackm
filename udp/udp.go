@@ -46,7 +46,7 @@ func TryParse(ip *ipv4.IPv4) (*UDP, error) {
 	t.SrcIP = ip.SrcIP
 	t.DstIP = ip.DstIP
 
-	return nil, nil
+	return t, nil
 }
 
 // ToBytes ..

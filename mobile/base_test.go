@@ -1,14 +1,14 @@
 package mobile
 
 import (
-	"syscall"
 	"testing"
-	"unsafe"
+
+	"github.com/Evan2698/netstackm/tun"
 )
 
 func Test_Main(t *testing.T) {
 
-	file, err := Open("tun0")
+	file, err := tun.Open("tun0")
 	if err != nil {
 		t.Error("can not open tun device", err)
 		return
@@ -20,4 +20,3 @@ func Test_Main(t *testing.T) {
 	<-systemsignal
 
 }
-
