@@ -2,6 +2,7 @@ package netcore
 
 import (
 	"errors"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -19,7 +20,7 @@ import (
 
 // Stack ...
 type Stack struct {
-	tun net.Conn
+	tun io.ReadWriteCloser
 
 	r *rand.Rand
 
@@ -47,14 +48,9 @@ func New(fd int) (*Stack, error) {
 	}
 
 	f := os.NewFile((uintptr)(fd), "")
-	t, err := net.FileConn(f)
-	if err != nil {
-		utils.LOG.Println("create file Con failed", err)
-		return nil, err
-	}
 
 	v := &Stack{
-		tun: t,
+		tun: f,
 		r:   rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 		t: &StateTable{
 			table: make(map[string]*State),
@@ -88,6 +84,8 @@ func (s *Stack) Start() {
 				break
 			}
 
+			utils.LOG.Println(" read data from tun", buffer[:n])
+
 			if n < 20 {
 				utils.LOG.Println("ip format is incorrect", n, "bytes")
 				continue
@@ -111,6 +109,8 @@ func (s *Stack) Start() {
 				continue
 			}
 
+			utils.LOG.Print("tobytes", ip.ToBytes())
+
 			if ip.Flags&0x1 != 0 || ip.FragmentOffset != 0 {
 				utils.LOG.Print("partial packet received")
 				end := ipv4.Merge(ip)
@@ -126,6 +126,13 @@ func (s *Stack) Start() {
 
 			switch ip.Protocol {
 			case ipv4.IPProtocolTCP:
+				tmp, _ := tcp.ParseTCP(ip)
+				utils.LOG.Println("tcp data", tmp.ToBytes())
+				tmp.Dump()
+				ip.PayLoad = tmp.ToBytes()
+				utils.LOG.Println("ip data", ip.ToBytes())
+				ip.Dump()
+
 				s.handleTCP(ip)
 			case ipv4.IPProtocolUDP:
 				s.handleUDP(ip)

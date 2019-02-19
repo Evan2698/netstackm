@@ -204,8 +204,9 @@ func (t *TCP) ToBytes() []byte {
 		out.WriteByte(0)
 	}
 
+	total := uint16(len(t.Payload)) + (uint16(t.Offset) * 4)
 	header := out.Bytes()
-	t.Sum = common.CalculateSum(header)
+	t.Sum = common.CalculateSum(buildpseudoheader(t.SrcIP, t.DstIP, total, header, t.Payload))
 	binary.BigEndian.PutUint16(header[16:], t.Sum)
 
 	var outX bytes.Buffer
@@ -214,6 +215,21 @@ func (t *TCP) ToBytes() []byte {
 
 	return outX.Bytes()
 
+}
+
+func buildpseudoheader(src, dst net.IP, length uint16, header, payload []byte) []byte {
+	var out bytes.Buffer
+	out.Write(src.To4())
+	out.Write(dst.To4())
+	out.WriteByte(0x00)
+	out.WriteByte(uint8(ipv4.TCP))
+	out.WriteByte(uint8(length >> 8))
+	out.WriteByte(uint8(length & 0xff))
+	out.Write(header)
+	if len(payload) > 0 {
+		out.Write(payload)
+	}
+	return out.Bytes()
 }
 
 // CopyHeaderFrom ..

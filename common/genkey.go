@@ -8,10 +8,10 @@ import (
 
 // GenerateUniqueKey ...
 func GenerateUniqueKey(src, dst net.IP, srcp, dstp uint16) string {
+	a := net.JoinHostPort(src.String(), fmt.Sprintf("%d", srcp))
+	b := net.JoinHostPort(dst.String(), fmt.Sprintf("%d", dstp))
 	return strings.Join([]string{
-		src.String(),
-		fmt.Sprintf("%d", srcp),
-		dst.String(),
-		fmt.Sprintf("%d", dstp),
+		a,
+		b,
 	}, "<->")
 }

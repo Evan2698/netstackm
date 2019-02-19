@@ -148,7 +148,7 @@ func (c *Connection) Open(t *tcp.TCP) error {
 		DestIP: t.DstIP,
 
 		Last:     time.Now(),
-		RecvNext: t.Acknowledgment + 1,
+		RecvNext: t.Sequence + 1,
 		SendNext: 1,
 
 		sendWindow: uint32(MAX_SEND_WINDOW),

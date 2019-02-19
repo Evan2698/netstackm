@@ -197,7 +197,6 @@ func (c *UDPConnection) run() {
 				case state.Conn.Recv <- []byte{}:
 				default:
 				}
-
 			}
 		case <-timeout.C:
 			c.handleClose()

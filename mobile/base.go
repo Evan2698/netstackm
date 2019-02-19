@@ -24,6 +24,8 @@ func StartService(fd int, proxy string, dns string) bool {
 		return false
 	}
 
+	gstack.Start()
+
 	go func() {
 		for {
 			c, err := gstack.Accept()
