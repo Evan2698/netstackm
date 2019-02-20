@@ -31,6 +31,7 @@ type Connection struct {
 	Recv   chan []byte
 
 	input chan *tcp.TCP
+	exit  chan bool
 }
 
 // LocalAddr returns the local network address.
@@ -76,7 +77,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 	}
 
 	select {
-	case <-time.After(120 * time.Second):
+	case <-time.After(30 * time.Second):
 		utils.LOG.Println("Timeout occured")
 		return 0, errors.New("Timeout occured")
 	case _, ok := <-c.Recv:
@@ -178,6 +179,10 @@ func (c *Connection) Open(t *tcp.TCP) error {
 
 func (c *Connection) run() {
 
+	defer func() {
+		c.exit <- true
+	}()
+
 	timeout := time.NewTimer(5 * time.Minute)
 
 	for {
@@ -244,8 +249,8 @@ func (c *Connection) handleLastAck(t *tcp.TCP) {
 	}
 
 	state.lockObject.Lock()
-	defer state.lockObject.Unlock()
 	state.SocketState = SocketClosed
+	state.lockObject.Unlock()
 	c.notifyclose()
 }
 
@@ -310,7 +315,7 @@ func (c *Connection) handleFinWait1(t *tcp.TCP) {
 	state.lockObject.Lock()
 	defer state.lockObject.Unlock()
 	if t.FIN {
-		state.SendNext = state.SendNext + 1
+		state.RecvNext = state.RecvNext + 1
 		r := ack(c.current)
 		c.Stack.sendtolow(packtcp(r), true)
 		if t.ACK && validAck(state.SendNext, t.Acknowledgment) {
@@ -367,6 +372,7 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + 1
 		r := finAck(state)
+		state.SendNext = state.SendNext + 1
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SocketState = SocketLastAck
 		state.lockObject.Unlock()
@@ -421,6 +427,11 @@ func (c *Connection) notifyclose() {
 	c.closed = true
 	utils.LOG.Println("notify close action!!!")
 	c.Stack.t.Remove(c.Src, c.Dst, c.SourcePort, c.DestinationPort)
+	state := c.current
+	state.lockObject.Lock()
+	finAck(state)
+	state.SendNext = state.SendNext + 1
+	state.lockObject.Unlock()
 }
 
 func (c *Connection) dispatch(t *tcp.TCP) {
@@ -429,20 +440,25 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 
 //Close ...
 func (c *Connection) Close() {
-	state := c.current
-	state.lockObject.Lock()
-	defer state.lockObject.Unlock()
 	t := tcp.Newtcp()
 	c.input <- t
 	t.Stop = true
+	<-c.exit
+	close(c.exit)
+	c.exit = nil
+	state := c.current
 	c.notifyclose()
-	time.Sleep(2 * time.Second)
+
+	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
+
 	close(c.input)
 	close(c.Recv)
 	c.buffer = nil
 	c.Stack = nil
 	c.input = nil
 	c.Recv = nil
+	utils.LOG.Println(common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort), "exit!!!!!")
 }
 
 // NewConnection ..
@@ -456,6 +472,7 @@ func NewConnection(src, dst net.IP, sport, dport uint16, s *Stack) *Connection {
 		Stack:           s,
 		Recv:            make(chan []byte),
 		input:           make(chan *tcp.TCP, 50),
+		exit:            make(chan bool),
 	}
 	return v
 }

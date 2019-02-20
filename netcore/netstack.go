@@ -2,7 +2,6 @@ package netcore
 
 import (
 	"errors"
-	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Evan2698/netstackm/tun"
 	"github.com/Evan2698/netstackm/udp"
 
 	"github.com/Evan2698/netstackm/tcp"
@@ -20,7 +20,7 @@ import (
 
 // Stack ...
 type Stack struct {
-	tun io.ReadWriteCloser
+	tun tun.ReadWriteCloseStoper
 
 	r *rand.Rand
 
@@ -36,6 +36,7 @@ type Stack struct {
 	b chan *UDPConnection
 
 	stop bool
+	exit chan bool
 }
 
 // New ...
@@ -50,7 +51,7 @@ func New(fd int) (*Stack, error) {
 	f := os.NewFile((uintptr)(fd), "")
 
 	v := &Stack{
-		tun: f,
+		tun: tun.NewTunDevice(f),
 		r:   rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 		t: &StateTable{
 			table: make(map[string]*State),
@@ -59,7 +60,8 @@ func New(fd int) (*Stack, error) {
 		u: &StateTable{
 			table: make(map[string]*State),
 		},
-		b: make(chan *UDPConnection, 20),
+		b:    make(chan *UDPConnection, 20),
+		exit: make(chan bool),
 	}
 
 	return v, nil
@@ -72,9 +74,13 @@ var DefaultBufferSize int = ipv4.MTU
 func (s *Stack) Start() {
 	go func() {
 
+		defer func() {
+			s.exit <- true
+		}()
+
 		for {
 			if s.stop {
-				utils.LOG.Println("stack exit!!!")
+				utils.LOG.Println("stack exit!!!^^^^^^")
 				break
 			}
 			var buffer = make([]byte, DefaultBufferSize)
@@ -83,6 +89,8 @@ func (s *Stack) Start() {
 				utils.LOG.Println("read from tun failed:", err)
 				break
 			}
+
+			utils.LOG.Println(n, "read bytes from tun!!")
 
 			if n < 20 {
 				utils.LOG.Println("ip format is incorrect", n, "bytes")
@@ -197,7 +205,11 @@ func (s *Stack) Accept() (*Connection, error) {
 		return nil, errors.New("closed")
 	}
 
-	c := <-s.a
+	c, ok := <-s.a
+	if !ok {
+		return nil, errors.New("channel closed")
+	}
+
 	return c, nil
 }
 
@@ -207,7 +219,11 @@ func (s *Stack) AcceptUDP() (*UDPConnection, error) {
 		return nil, errors.New("closed")
 	}
 
-	c := <-s.b
+	c, ok := <-s.b
+	if !ok {
+		return nil, errors.New("channel closed")
+	}
+
 	return c, nil
 }
 
@@ -236,6 +252,9 @@ func (s *Stack) Close() {
 	}
 
 	s.stop = true
+	s.tun.SetStop(true)
+	<-s.exit
+	close(s.exit)
 	time.Sleep(time.Second * 2)
 	if s.a != nil {
 		close(s.a)

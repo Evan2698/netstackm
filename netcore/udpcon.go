@@ -1,6 +1,7 @@
 package netcore
 
 import (
+	"container/list"
 	"errors"
 	"io"
 	"net"
@@ -16,11 +17,12 @@ type UDPConnection struct {
 	Src, Dst                    net.IP
 	SourcePort, DestinationPort uint16
 	Stack                       *Stack
-	buffer                      []byte
+	cache                       *list.List
 	Recv                        chan []byte
 	current                     *State
 	input                       chan *udp.UDP
 	closed                      bool
+	exit                        chan bool
 }
 
 // LocalAddr returns the local network address.
@@ -47,18 +49,23 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 		return 0, errors.New("UDP Closed")
 	}
 
+	n = -1
 	state := c.current
-
-	if len(c.buffer) > 0 {
-		state.lockObject.Lock()
-		n := copy(b, c.buffer[:])
-		c.buffer = c.buffer[n:]
-		state.lockObject.Unlock()
+	state.lockObject.Lock()
+	if c.cache.Len() > 0 {
+		v, ok := c.cache.Front().Value.([]byte)
+		if ok {
+			n = copy(b, v)
+		}
+		c.cache.Remove(c.cache.Front())
+	}
+	state.lockObject.Unlock()
+	if n > -1 {
 		return n, nil
 	}
 
 	select {
-	case <-time.After(120 * time.Second):
+	case <-time.After(30 * time.Second):
 		utils.LOG.Println("Timeout occured")
 		return 0, errors.New("Timeout occured")
 	case _, ok := <-c.Recv:
@@ -67,8 +74,13 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 			return 0, io.EOF
 		}
 		state.lockObject.Lock()
-		n := copy(b[:], c.buffer[:])
-		c.buffer = c.buffer[n:]
+		if c.cache.Len() > 0 {
+			v, ok := c.cache.Front().Value.([]byte)
+			if ok {
+				n = copy(b, v)
+			}
+			c.cache.Remove(c.cache.Front())
+		}
 		state.lockObject.Unlock()
 		return n, nil
 	}
@@ -115,6 +127,7 @@ func (c *UDPConnection) buildIPPacket(pkt *udp.UDP) []*ipv4.IPv4 {
 	for n > 0 {
 
 		ippkt = ipv4.NewIPv4()
+		ippkt.Version = 4
 		ippkt.SrcIP = pkt.SrcIP
 		ippkt.DstIP = pkt.DstIP
 		ippkt.Protocol = ipv4.IPProtocolUDP
@@ -163,8 +176,8 @@ func (c *UDPConnection) Open(t *udp.UDP) error {
 		return err
 	}
 	state.lockObject.Lock()
-	defer state.lockObject.Unlock()
 	c.current = state
+	state.lockObject.Unlock()
 
 	go c.run()
 	c.dispatch(t)
@@ -173,6 +186,12 @@ func (c *UDPConnection) Open(t *udp.UDP) error {
 }
 
 func (c *UDPConnection) run() {
+	defer func() {
+		c.exit <- true
+	}()
+
+	c.Stack.b <- c
+
 	timeout := time.NewTimer(2 * time.Minute)
 
 	for {
@@ -188,10 +207,9 @@ func (c *UDPConnection) run() {
 
 			pl := len(t.Payload)
 			state := c.current
-
 			if pl > 0 {
 				state.lockObject.Lock()
-				state.Connu.buffer = append(state.Connu.buffer, t.Payload[:]...)
+				c.cache.PushBack(t.Payload)
 				state.lockObject.Unlock()
 				select {
 				case state.Connu.Recv <- []byte{}:
@@ -218,18 +236,19 @@ func (c *UDPConnection) handleClose() {
 
 // Close ...
 func (c *UDPConnection) Close() {
+	c.handleClose()
 	u := udp.NewUDP()
 	u.Stop = true
 	c.input <- u
-	c.handleClose()
-
+	<-c.exit
+	close(c.exit)
+	c.exit = nil
 	if c.Recv != nil {
 		close(c.Recv)
 	}
 	c.Recv = nil
 	c.Stack = nil
 	c.current = nil
-
 }
 
 // NewUDPConnection ..
@@ -243,6 +262,8 @@ func NewUDPConnection(src, dst net.IP, sport, dport uint16, s *Stack) *UDPConnec
 		Stack:           s,
 		Recv:            make(chan []byte),
 		input:           make(chan *udp.UDP, 10),
+		exit:            make(chan bool),
+		cache:           list.New(),
 	}
 	return v
 }

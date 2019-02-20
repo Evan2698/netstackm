@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/Evan2698/chimney/utils"
 	"github.com/Evan2698/netstackm/dns"
@@ -107,66 +108,75 @@ func handTCPConnection(c *netcore.Connection, url string) {
 
 var gcache = dns.NewDNSCache()
 
-func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
-	defer c.Close()
+func settimeout(con net.Conn, second int) {
+	readTimeout := time.Duration(second) * time.Second
+	v := time.Now().Add(readTimeout)
+	con.SetReadDeadline(v)
+	con.SetWriteDeadline(v)
+	con.SetDeadline(v)
+}
 
+func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
+
+	defer c.Close()
 	con, err := net.Dial("udp", url)
 	if err != nil {
 		utils.LOG.Println("connect udp failed", err)
 		return
 	}
-
-	defer con.Close()
-
-	go func() {
-		hello := make([]byte, 4096)
-		for {
-			n, err := con.Read(hello)
-			if err != nil {
-				utils.LOG.Println("read udp from proxy failed", err)
-				break
-			}
-			if strings.Contains(c.RemoteAddr().String(), dns) {
-				gcache.Store(hello[:n])
-			}
-			_, err = c.Write(hello[:n])
-			if err != nil {
-				utils.LOG.Println("write udp to tun failed", err)
-				break
-			}
-		}
-
+	defer func() {
+		con.Close()
 	}()
 
-	buf := make([]byte, 4000)
-	for {
-		n, err := c.Read(buf)
-		if err != nil {
-			utils.LOG.Println("read udp from tun failed", err)
-			break
-		}
+	settimeout(con, 120) // set timeout
 
-		if strings.Contains(c.RemoteAddr().String(), dns) {
-			answer := gcache.Query(buf[:n])
-			if answer != nil {
-				data, e := answer.PackBuffer(buf[:])
-				if e == nil {
-					go func() {
-						_, er := c.Write(data)
-						utils.LOG.Print("write dns response: ", er)
-					}()
-					return
-				}
+	buf := make([]byte, 4096)
+	n, err := c.Read(buf[:4000])
+	if err != nil {
+		utils.LOG.Println("read udp from tun failed", err)
+		return
+	}
+
+	utils.LOG.Print("UDP READ: ", buf[:n])
+
+	if strings.Contains(c.RemoteAddr().String(), dns) {
+		answer := gcache.Query(buf[:n])
+		if answer != nil {
+			data, e := answer.PackBuffer(buf[:])
+			if e == nil {
+				go func() {
+					_, er := c.Write(data)
+					utils.LOG.Print("dns response in cache:  ", er)
+				}()
+				return
 			}
 		}
-
-		v := packUDPHeader(buf[:n], c.RemoteAddr())
-		_, err = con.Write(v)
-		if err != nil {
-			utils.LOG.Println("write udp to proxy failed", err)
-			break
-		}
 	}
+
+	v := packUDPHeader(buf[:n], c.RemoteAddr())
+	_, err = con.Write(v)
+	if err != nil {
+		utils.LOG.Println("write udp to proxy failed", err)
+		return
+	}
+
+	n, err = con.Read(buf)
+	if err != nil {
+		utils.LOG.Println("read udp from proxy failed", err)
+		return
+	}
+
+	raw := buf[:n]
+	if strings.Contains(c.RemoteAddr().String(), dns) {
+		gcache.Store(raw)
+	}
+
+	_, err = c.Write(raw)
+	if err != nil {
+		utils.LOG.Println("write udp to tun failed", err)
+	}
+
+	utils.LOG.Println("X  ----------------exit!")
 }
 
 func packUDPHeader(b []byte, addr net.Addr) []byte {
@@ -179,7 +189,6 @@ func packUDPHeader(b []byte, addr net.Addr) []byte {
 	out.Write(sz)
 	out.Write([]byte(addr.String()))
 	out.Write(b)
-
 	return out.Bytes()
 }
 

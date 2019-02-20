@@ -14,7 +14,7 @@ func Test_Main(t *testing.T) {
 		return
 	}
 
-	StartService(file, "127.0.0.1:9998", "114.114.114.114")
+	StartService(file, "127.0.0.1:9998", "1.0.0.1")
 
 	var systemsignal = make(chan int, 2)
 	<-systemsignal
