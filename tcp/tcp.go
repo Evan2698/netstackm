@@ -222,7 +222,7 @@ func buildpseudoheader(src, dst net.IP, length uint16, header, payload []byte) [
 	out.Write(src.To4())
 	out.Write(dst.To4())
 	out.WriteByte(0x00)
-	out.WriteByte(uint8(ipv4.TCP))
+	out.WriteByte(uint8(ipv4.IPProtocolTCP))
 	out.WriteByte(uint8(length >> 8))
 	out.WriteByte(uint8(length & 0xff))
 	out.Write(header)
@@ -291,5 +291,6 @@ func (t *TCP) Dump() {
 	for _, k := range t.Options {
 		k.Dump()
 	}
+	utils.LOG.Println("payload size: ", len(t.Payload))
 	utils.LOG.Println("-----------------------------------------")
 }

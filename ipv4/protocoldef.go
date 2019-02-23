@@ -76,3 +76,7 @@ func (s IPProtocol) String() string {
 
 	return "unknown"
 }
+
+const (
+	MTU = 1500
+)

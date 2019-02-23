@@ -4,6 +4,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/Evan2698/chimney/utils"
 )
 
 const (
@@ -35,4 +37,9 @@ type State struct {
 	Connu *UDPConnection
 
 	Conn *Connection
+}
+
+func (s *State) Dump() {
+	utils.LOG.Println("SendNext", s.SendNext)
+	utils.LOG.Println("RecvNext", s.RecvNext)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Evan2698/chimney/utils"
@@ -71,9 +72,12 @@ func handTCPConnection(c *netcore.Connection, url string) {
 
 	defer con.Close()
 
-	go func() {
-		var sz [1500]byte
+	var wg sync.WaitGroup
+	wg.Add(1)
 
+	go func() {
+		defer wg.Done()
+		var sz [1500]byte
 		for {
 			n, err := con.Read(sz[:])
 			if err != nil {
@@ -98,11 +102,14 @@ func handTCPConnection(c *netcore.Connection, url string) {
 
 		_, err = con.Write(buffer[:n])
 		if err != nil {
-			utils.LOG.Print("proxy exit", err)
+			utils.LOG.Print("proxy write error", err)
 			break
 		}
 
 	}
+
+	wg.Wait()
+	utils.LOG.Println("TCP exit!!!!")
 
 }
 

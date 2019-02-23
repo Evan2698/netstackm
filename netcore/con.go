@@ -77,7 +77,7 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 	}
 
 	select {
-	case <-time.After(30 * time.Second):
+	case <-time.After(10 * time.Minute):
 		utils.LOG.Println("Timeout occured")
 		return 0, errors.New("Timeout occured")
 	case _, ok := <-c.Recv:
@@ -109,15 +109,12 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 	}
 
 	state := c.current
-
-	state.lockObject.Lock()
-	defer state.lockObject.Unlock()
-
 	sz := len(b)
 	rest := b
 	var data []byte
 	standard := ipv4.MTU - 40
 	for sz > 0 {
+		state.lockObject.Lock()
 		if sz > standard {
 			data = rest[:standard]
 			rest = rest[standard:]
@@ -129,10 +126,11 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SendNext += uint32(len(data))
 		state.sendWindow -= uint32(len(data))
-		if state.sendWindow < ipv4.MTU {
+		if state.sendWindow < ipv4.MTU*5 {
 			state.sendWindow = 64420
 		}
 		sz = len(rest)
+		state.lockObject.Unlock()
 	}
 
 	return len(b), nil
@@ -141,6 +139,7 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 // Open ...
 func (c *Connection) Open(t *tcp.TCP) error {
 
+	sendNext := uint32(c.Stack.r.Intn(2147483648))
 	state := &State{
 		SrcPort:  t.SrcPort,
 		DestPort: t.DstPort,
@@ -150,7 +149,7 @@ func (c *Connection) Open(t *tcp.TCP) error {
 
 		Last:     time.Now(),
 		RecvNext: t.Sequence + 1,
-		SendNext: 1,
+		SendNext: sendNext,
 
 		sendWindow: uint32(MAX_SEND_WINDOW),
 		recvWindow: uint32(MAX_RECV_WINDOW),
@@ -168,7 +167,7 @@ func (c *Connection) Open(t *tcp.TCP) error {
 	c.current = state
 	x := synack(state)
 	v := packtcp(x)
-	c.Stack.sendtolow(v, false)
+	c.Stack.sendtolow(v, true)
 	c.current.SendNext = c.current.SendNext + 1
 	state.SocketState = SocketSynReceived
 
@@ -200,6 +199,11 @@ func (c *Connection) run() {
 			utils.LOG.Println("connection: ",
 				common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort),
 				"current state: ", c.current.SocketState.String())
+
+			utils.LOG.Println("+++++++++++++++++++++++++++ begin")
+			t.Dump()
+			c.current.Dump()
+			utils.LOG.Println("+++++++++++++++++++++++++++ end !!")
 
 			c.updateWindow(t)
 
@@ -238,6 +242,7 @@ func (c *Connection) updateWindow(t *tcp.TCP) {
 
 func (c *Connection) handleLastAck(t *tcp.TCP) {
 
+	c.handleclosed()
 	state := c.current
 	if !validAck(state.SendNext, t.Acknowledgment) || !validSeq(t.Sequence, state.RecvNext) {
 		utils.LOG.Println("valid failed in handleFinWait2")
@@ -251,7 +256,6 @@ func (c *Connection) handleLastAck(t *tcp.TCP) {
 	state.lockObject.Lock()
 	state.SocketState = SocketClosed
 	state.lockObject.Unlock()
-	c.notifyclose()
 }
 
 func (c *Connection) handleClosing(t *tcp.TCP) {
@@ -340,7 +344,8 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 
 	// connection ends by valid RST
 	if t.RST {
-		c.notifyclose()
+		utils.LOG.Print("OPPPPPSS RST")
+		//c.notifyclose()
 		return
 	}
 	// ignore non-ACK packets
@@ -352,28 +357,37 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 
 	state := c.current
 	pl := len(t.Payload)
-
+	state.lockObject.Lock()
 	if pl > 0 {
-		state.lockObject.Lock()
+
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU {
+		if state.recvWindow < ipv4.MTU*5 {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
-		state.lockObject.Unlock()
+	}
+
+	if pl > 0 {
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
 		}
 	}
+
+	// ack
+	ak := ack(state)
+	c.Stack.sendtolow(packtcp(ak), true)
+	//------------------------------
+	state.lockObject.Unlock()
+
 	if t.FIN {
 		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + 1
 		r := finAck(state)
-		state.SendNext = state.SendNext + 1
 		c.Stack.sendtolow(packtcp(r), true)
+		state.SendNext = state.SendNext + 1
 		state.SocketState = SocketLastAck
 		state.lockObject.Unlock()
 	}
@@ -403,34 +417,44 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 
 	pl := len(t.Payload)
 	state.lockObject.Lock()
-	state.SocketState = SocketEstablished
-	state.lockObject.Unlock()
-	c.Stack.a <- c
 	if pl > 0 {
-		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = state.recvWindow - uint32(pl)
 		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU {
+		if state.recvWindow < ipv4.MTU*5 {
 			state.recvWindow = 64420
 		}
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
-		state.lockObject.Unlock()
+	}
+
+	ac := ack(state)
+	c.Stack.sendtolow(packtcp(ac), true)
+	state.SocketState = SocketEstablished
+	state.lockObject.Unlock()
+
+	if pl > 0 {
 		select {
 		case state.Conn.Recv <- []byte{}:
 		default:
 		}
 	}
+	c.Stack.a <- c
 }
 
-func (c *Connection) notifyclose() {
+func (c *Connection) handleclosed() {
 	c.closed = true
 	utils.LOG.Println("notify close action!!!")
 	c.Stack.t.Remove(c.Src, c.Dst, c.SourcePort, c.DestinationPort)
+}
+
+func (c *Connection) notifyclose() {
 	state := c.current
 	state.lockObject.Lock()
-	finAck(state)
+	state.RecvNext = state.RecvNext + 1
+	t := finAck(state)
+	c.Stack.sendtolow(packtcp(t), true)
 	state.SendNext = state.SendNext + 1
+	state.SocketState = SocketFinWait1
 	state.lockObject.Unlock()
 }
 
@@ -440,6 +464,8 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 
 //Close ...
 func (c *Connection) Close() {
+	c.handleclosed()
+
 	t := tcp.Newtcp()
 	c.input <- t
 	t.Stop = true
@@ -447,7 +473,6 @@ func (c *Connection) Close() {
 	close(c.exit)
 	c.exit = nil
 	state := c.current
-	c.notifyclose()
 
 	state.lockObject.Lock()
 	defer state.lockObject.Unlock()
@@ -458,7 +483,7 @@ func (c *Connection) Close() {
 	c.Stack = nil
 	c.input = nil
 	c.Recv = nil
-	utils.LOG.Println(common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort), "exit!!!!!")
+	utils.LOG.Println(common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort), "TCP connection exit!!!!!")
 }
 
 // NewConnection ..

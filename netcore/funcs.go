@@ -17,7 +17,7 @@ func synack(c *State) *tcp.TCP {
 	pak.ACK = true
 	pak.Sequence = c.SendNext
 	pak.Acknowledgment = c.RecvNext
-	pak.WndSize = uint16(c.recvWindow)
+	pak.WndSize = 64420
 	pak.Options = make([]*tcp.TCPOption, 1)
 
 	item := tcp.NewTCPOption()
@@ -80,7 +80,7 @@ func ack(current *State) *tcp.TCP {
 	pak.DstIP = current.SrcIP
 	pak.SrcPort = current.DestPort
 	pak.DstPort = current.SrcPort
-	pak.WndSize = uint16(current.recvWindow)
+	pak.WndSize = 64420
 	pak.ACK = true
 	pak.Sequence = current.SendNext
 	pak.Acknowledgment = current.RecvNext
@@ -94,12 +94,11 @@ func finAck(current *State) *tcp.TCP {
 	pak.DstIP = current.SrcIP
 	pak.SrcPort = current.DestPort
 	pak.DstPort = current.SrcPort
-	pak.WndSize = uint16(current.recvWindow)
+	pak.WndSize = 64420
 	pak.FIN = true
 	pak.ACK = true
 	pak.Sequence = current.SendNext
 	pak.Acknowledgment = current.RecvNext
-	current.SendNext = current.SendNext + 1
 	return pak
 }
 
@@ -110,8 +109,8 @@ func payload(current *State, data []byte) *tcp.TCP {
 	pak.DstIP = current.SrcIP
 	pak.SrcPort = current.DestPort
 	pak.DstPort = current.SrcPort
-	pak.WndSize = uint16(current.recvWindow)
-	pak.FIN = true
+	pak.WndSize = 64420
+	pak.ACK = true
 	pak.PSH = true
 	pak.Sequence = current.SendNext
 	pak.Acknowledgment = current.RecvNext

@@ -90,7 +90,7 @@ func (t *UDP) buildPseudoHeader(src, dst net.IP) []byte {
 	out.Write(src.To4())
 	out.Write(dst.To4())
 	out.WriteByte(0x00)
-	out.WriteByte(uint8(ipv4.UDP))
+	out.WriteByte(uint8(ipv4.IPProtocolUDP))
 	out.WriteByte(uint8(t.Length >> 8))
 	out.WriteByte(uint8(t.Length & 0xff))
 	return out.Bytes()
