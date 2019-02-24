@@ -2,6 +2,7 @@ package netcore
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 
@@ -28,10 +29,11 @@ type Connection struct {
 	Stack *Stack
 
 	buffer []byte
-	Recv   chan []byte
 
 	input chan *tcp.TCP
 	exit  chan bool
+
+	Recv chan bool
 }
 
 // LocalAddr returns the local network address.
@@ -65,37 +67,26 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 		state.lockObject.Lock()
 		n := copy(b, c.buffer[:])
 		c.buffer = c.buffer[n:]
-
-		state.recvWindow = state.recvWindow + uint32(n)
-		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU {
-			state.recvWindow = 64420
-		}
+		state.recvWindow = 64420
 		state.lockObject.Unlock()
 
 		return n, nil
 	}
 
 	select {
-	case <-time.After(10 * time.Minute):
-		utils.LOG.Println("Timeout occured")
-		return 0, errors.New("Timeout occured")
+	case <-time.After(300 * time.Second):
+		fmt.Println("Timeout occured")
+		return 0, errors.New("Timeout occured.")
 	case _, ok := <-c.Recv:
 		if !ok {
 			// connection closed?
 			return 0, io.EOF
 		}
 		state.lockObject.Lock()
-		n := copy(b[:], c.buffer[:])
+		n = copy(b[:], c.buffer[:])
 		c.buffer = c.buffer[n:]
-
-		state.recvWindow = state.recvWindow + uint32(n)
-		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU {
-			state.recvWindow = 64420
-		}
+		state.recvWindow = 64420
 		state.lockObject.Unlock()
-
 		return n, nil
 	}
 }
@@ -125,10 +116,7 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 		r := payload(state, data)
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SendNext += uint32(len(data))
-		state.sendWindow -= uint32(len(data))
-		if state.sendWindow < ipv4.MTU*5 {
-			state.sendWindow = 64420
-		}
+		state.sendWindow = 64420
 		sz = len(rest)
 		state.lockObject.Unlock()
 	}
@@ -139,7 +127,7 @@ func (c *Connection) Write(b []byte) (n int, err error) {
 // Open ...
 func (c *Connection) Open(t *tcp.TCP) error {
 
-	sendNext := uint32(c.Stack.r.Intn(2147483648))
+	sendNext := uint32(c.Stack.r.Int31n(2147483))
 	state := &State{
 		SrcPort:  t.SrcPort,
 		DestPort: t.DstPort,
@@ -358,38 +346,28 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 	state := c.current
 	pl := len(t.Payload)
 	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
 	if pl > 0 {
 
 		state.RecvNext = state.RecvNext + uint32(pl)
-		state.recvWindow = state.recvWindow - uint32(pl)
-		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU*5 {
-			state.recvWindow = 64420
-		}
+		state.recvWindow = 64420
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
-	}
-
-	if pl > 0 {
 		select {
-		case state.Conn.Recv <- []byte{}:
+		case c.Recv <- true:
 		default:
 		}
 	}
-
 	// ack
 	ak := ack(state)
 	c.Stack.sendtolow(packtcp(ak), true)
 	//------------------------------
-	state.lockObject.Unlock()
 
 	if t.FIN {
-		state.lockObject.Lock()
 		state.RecvNext = state.RecvNext + 1
 		r := finAck(state)
 		c.Stack.sendtolow(packtcp(r), true)
 		state.SendNext = state.SendNext + 1
 		state.SocketState = SocketLastAck
-		state.lockObject.Unlock()
 	}
 }
 
@@ -405,7 +383,9 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 	}
 
 	if t.RST {
-		c.notifyclose()
+		utils.LOG.Println("ignore this packet", state.SocketState.String())
+		t.Dump()
+		//c.notifyclose()
 		return
 	}
 
@@ -416,29 +396,24 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 	}
 
 	pl := len(t.Payload)
+
 	state.lockObject.Lock()
+	defer state.lockObject.Unlock()
+
 	if pl > 0 {
 		state.RecvNext = state.RecvNext + uint32(pl)
-		state.recvWindow = state.recvWindow - uint32(pl)
-		state.recvWindow = state.recvWindow & 0xffff
-		if state.recvWindow < ipv4.MTU*5 {
-			state.recvWindow = 64420
-		}
+		state.recvWindow = 64420
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
 	}
 
 	ac := ack(state)
 	c.Stack.sendtolow(packtcp(ac), true)
 	state.SocketState = SocketEstablished
-	state.lockObject.Unlock()
-
-	if pl > 0 {
-		select {
-		case state.Conn.Recv <- []byte{}:
-		default:
-		}
-	}
 	c.Stack.a <- c
+	select {
+	case c.Recv <- true:
+	default:
+	}
 }
 
 func (c *Connection) handleclosed() {
@@ -464,7 +439,13 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 
 //Close ...
 func (c *Connection) Close() {
-	c.handleclosed()
+	utils.LOG.Print("close function was called by caller..")
+	c.notifyclose()
+	select {
+	case c.Recv <- true:
+	default:
+	}
+	time.Sleep(time.Second * 10)
 
 	t := tcp.Newtcp()
 	c.input <- t
@@ -478,7 +459,6 @@ func (c *Connection) Close() {
 	defer state.lockObject.Unlock()
 
 	close(c.input)
-	close(c.Recv)
 	c.buffer = nil
 	c.Stack = nil
 	c.input = nil
@@ -495,9 +475,10 @@ func NewConnection(src, dst net.IP, sport, dport uint16, s *Stack) *Connection {
 		SourcePort:      sport,
 		DestinationPort: dport,
 		Stack:           s,
-		Recv:            make(chan []byte),
 		input:           make(chan *tcp.TCP, 50),
 		exit:            make(chan bool),
+		Recv:            make(chan bool),
 	}
+
 	return v
 }

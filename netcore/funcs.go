@@ -46,7 +46,6 @@ func rst(sip, dip net.IP, sport, dport uint16, seq, ack uint32, payloadlen uint3
 	if ack != 0 {
 		pak.Sequence = ack
 	}
-
 	return pak
 }
 
@@ -57,8 +56,10 @@ func packtcp(tcp *tcp.TCP) []byte {
 	ip.Identification = ipv4.GeneratorIPID()
 	ip.SrcIP = tcp.SrcIP
 	ip.DstIP = tcp.DstIP
-	ip.TTL = 128
+	ip.TTL = 64
 	ip.PayLoad = tcp.ToBytes()
+	ip.FragmentOffset = 0
+	ip.Flags = 0x2
 
 	return ip.ToBytes()
 }

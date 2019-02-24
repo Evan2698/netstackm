@@ -28,15 +28,14 @@ func (table *StateTable) Add(src, dst net.IP, sport, dport uint16, state *State)
 // Get ...
 func (table *StateTable) Get(src, dst net.IP, sport, dport uint16) *State {
 	key := common.GenerateUniqueKey(src, dst, sport, dport)
-	utils.LOG.Println("Get one:", key)
 	table.lock.RLock()
 	defer table.lock.RUnlock()
 	v, ok := table.table[key]
 	if !ok {
-		utils.LOG.Println("Get one:", key)
+		utils.LOG.Println("can not find key: ", key)
 		return nil
 	}
-
+	utils.LOG.Println("Got value of key", key)
 	return v
 }
 

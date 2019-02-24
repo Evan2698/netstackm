@@ -283,7 +283,7 @@ func (t *TCP) IsStop() bool {
 
 func (t *TCP) Dump() {
 	utils.LOG.Println("-----------------------------------------")
-	utils.LOG.Println("src", t.SrcIP.String(), ":", t.SrcPort, "<->", t.DstIP.String(), ":", t.DstPort)
+	utils.LOG.Println(common.GenerateUniqueKey(t.SrcIP, t.DstIP, t.SrcPort, t.DstPort))
 	utils.LOG.Println("Sequence", t.Sequence, ":", "Acknowledgment", t.Acknowledgment)
 	utils.LOG.Println("offset", t.Offset, ":", "NS", t.NS)
 	utils.LOG.Println("CWR", t.CWR, ":", "ECE", t.ECE, ":", "URG", t.URG, ":ACK", t.ACK, ":PSH", t.PSH, ":RST", t.RST, ":SYN", t.SYN, ":FIN", t.FIN)
@@ -291,6 +291,6 @@ func (t *TCP) Dump() {
 	for _, k := range t.Options {
 		k.Dump()
 	}
-	utils.LOG.Println("payload size: ", len(t.Payload))
+	utils.LOG.Println("payload size: ", len(t.Payload), t.Payload)
 	utils.LOG.Println("-----------------------------------------")
 }

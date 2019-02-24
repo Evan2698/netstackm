@@ -159,7 +159,7 @@ func (s *Stack) handleTCP(ip *ipv4.IPv4) {
 
 		if !pkt.SYN {
 			relay := rst(pkt.SrcIP, pkt.DstIP, pkt.SrcPort, pkt.DstPort, pkt.Sequence, pkt.Acknowledgment, uint32(len(pkt.Payload)))
-			s.sendtolow(packtcp(relay), false)
+			s.sendtolow(packtcp(relay), true)
 			return
 		}
 

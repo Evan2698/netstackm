@@ -56,6 +56,7 @@ func StartService(fd int, proxy string, dns string) bool {
 func handTCPConnection(c *netcore.Connection, url string) {
 	defer c.Close()
 
+	utils.LOG.Println("proxy", url)
 	dialer, err := proxy.SOCKS5("tcp", url, nil, proxy.Direct)
 	if err != nil {
 		fmt.Println("Error connecting to proxy:", err)
@@ -63,6 +64,7 @@ func handTCPConnection(c *netcore.Connection, url string) {
 	}
 
 	host := c.RemoteAddr().String()
+	utils.LOG.Println("remote server:", host)
 
 	con, err := dialer.Dial("tcp", host)
 	if err != nil {
@@ -77,7 +79,7 @@ func handTCPConnection(c *netcore.Connection, url string) {
 
 	go func() {
 		defer wg.Done()
-		var sz [1500]byte
+		var sz [1400]byte
 		for {
 			n, err := con.Read(sz[:])
 			if err != nil {
@@ -92,14 +94,14 @@ func handTCPConnection(c *netcore.Connection, url string) {
 		}
 
 	}()
-	var buffer [1500]byte
+	var buffer [1400]byte
 	for {
 		n, err := c.Read(buffer[:])
 		if err != nil {
 			utils.LOG.Print("exit", err)
 			break
 		}
-
+		utils.LOG.Println("TCP DATA:", buffer[:n])
 		_, err = con.Write(buffer[:n])
 		if err != nil {
 			utils.LOG.Print("proxy write error", err)
