@@ -208,6 +208,7 @@ func (c *Connection) run() {
 				c.handleClosing(t)
 			case SocketLastAck:
 				c.handleLastAck(t)
+				return
 			default:
 				utils.LOG.Println("unhandle state: ", c.current.SocketState.String())
 			}
@@ -348,7 +349,6 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 	state.lockObject.Lock()
 	defer state.lockObject.Unlock()
 	if pl > 0 {
-
 		state.RecvNext = state.RecvNext + uint32(pl)
 		state.recvWindow = 64420
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
@@ -358,8 +358,8 @@ func (c *Connection) handleEstablished(t *tcp.TCP) {
 		}
 	}
 	// ack
-	ak := ack(state)
-	c.Stack.sendtolow(packtcp(ak), true)
+	//ak := ack(state)
+	//c.Stack.sendtolow(packtcp(ak), true)
 	//------------------------------
 
 	if t.FIN {
@@ -401,13 +401,14 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 	defer state.lockObject.Unlock()
 
 	if pl > 0 {
-		state.RecvNext = state.RecvNext + uint32(pl)
+
 		state.recvWindow = 64420
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
 	}
 
-	ac := ack(state)
-	c.Stack.sendtolow(packtcp(ac), true)
+	//ac := ack(state)
+	//c.Stack.sendtolow(packtcp(ac), true)
+	state.RecvNext = state.RecvNext + uint32(pl)
 	state.SocketState = SocketEstablished
 	c.Stack.a <- c
 	select {
