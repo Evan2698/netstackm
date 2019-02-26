@@ -192,7 +192,7 @@ func (ip *IPv4) Close() {
 	ip.PayLoad = nil
 }
 
-// CopyHeaderFrom ..
+//CopyHeaderFrom ..
 func (ip *IPv4) CopyHeaderFrom(it *IPv4) {
 	ip.Version = it.Version
 	ip.IHL = it.IHL
