@@ -1,5 +1,9 @@
 package ipv4
 
+import (
+	"github.com/Evan2698/netstackm/common"
+)
+
 type IPProtocol uint8
 
 const (
@@ -78,5 +82,6 @@ func (s IPProtocol) String() string {
 }
 
 const (
-	MTU = 1500
+	// MTU ...
+	MTU = common.CONFIGMTU
 )
