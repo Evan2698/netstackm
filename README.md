@@ -1,5 +1,5 @@
 # netstackms
-smple netstack for android or ios 
+simple netstack for android or ios 
 
 
 
