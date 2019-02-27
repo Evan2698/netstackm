@@ -20,9 +20,7 @@ type UDPConnection struct {
 	cache                       *list.List
 	Recv                        chan []byte
 	current                     *State
-	input                       chan *udp.UDP
 	closed                      bool
-	exit                        chan bool
 }
 
 // LocalAddr returns the local network address.
@@ -103,7 +101,7 @@ func (c *UDPConnection) Write(b []byte) (n int, err error) {
 		tmpu.Payload = b
 		l := c.buildIPPacket(tmpu)
 		for _, item := range l {
-			c.Stack.sendtolow(item.ToBytes(), true)
+			c.Stack.SendTo(item.ToBytes())
 		}
 	}
 
@@ -178,55 +176,33 @@ func (c *UDPConnection) Open(t *udp.UDP) error {
 	state.lockObject.Lock()
 	c.current = state
 	state.lockObject.Unlock()
-
-	go c.run()
+	c.Stack.b <- c
 	c.dispatch(t)
-
 	return nil
 }
 
-func (c *UDPConnection) run() {
-	defer func() {
-		c.exit <- true
-	}()
+func (c *UDPConnection) run(t *udp.UDP) {
+	if t.IsStop() {
+		utils.LOG.Print("udp loop exit!!")
+		return
+	}
 
-	c.Stack.b <- c
-
-	timeout := time.NewTimer(2 * time.Minute)
-
-	for {
-		timeout.Reset(2 * time.Minute)
-
+	pl := len(t.Payload)
+	state := c.current
+	if pl > 0 {
+		state.lockObject.Lock()
+		c.cache.PushBack(t.Payload)
+		state.lockObject.Unlock()
 		select {
-		case t := <-c.input:
-			if t.IsStop() {
-				timeout.Stop()
-				utils.LOG.Print("udp loop exit!!")
-				return
-			}
-
-			pl := len(t.Payload)
-			state := c.current
-			if pl > 0 {
-				state.lockObject.Lock()
-				c.cache.PushBack(t.Payload)
-				state.lockObject.Unlock()
-				select {
-				case state.Connu.Recv <- []byte{}:
-				default:
-				}
-			}
-		case <-timeout.C:
-			c.handleClose()
+		case state.Connu.Recv <- []byte{}:
+		default:
 		}
-
-		timeout.Stop()
 	}
 
 }
 
 func (c *UDPConnection) dispatch(t *udp.UDP) {
-	c.input <- t
+	c.run(t)
 }
 
 func (c *UDPConnection) handleClose() {
@@ -239,10 +215,6 @@ func (c *UDPConnection) Close() {
 	c.handleClose()
 	u := udp.NewUDP()
 	u.Stop = true
-	c.input <- u
-	<-c.exit
-	close(c.exit)
-	c.exit = nil
 	if c.Recv != nil {
 		close(c.Recv)
 	}
@@ -261,8 +233,6 @@ func NewUDPConnection(src, dst net.IP, sport, dport uint16, s *Stack) *UDPConnec
 		DestinationPort: dport,
 		Stack:           s,
 		Recv:            make(chan []byte),
-		input:           make(chan *udp.UDP, 10),
-		exit:            make(chan bool),
 		cache:           list.New(),
 	}
 	return v

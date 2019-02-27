@@ -2,14 +2,14 @@ package netcore
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
-	"net"
-	"os"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/Evan2698/netstackm/tun"
+	"github.com/Evan2698/netstackm/common"
+
 	"github.com/Evan2698/netstackm/udp"
 
 	"github.com/Evan2698/netstackm/tcp"
@@ -20,8 +20,6 @@ import (
 
 // Stack ...
 type Stack struct {
-	tun tun.ReadWriteCloseStoper
-
 	r *rand.Rand
 
 	m sync.Mutex
@@ -32,11 +30,11 @@ type Stack struct {
 	t *StateTable
 	u *StateTable
 
-	a chan *Connection
-	b chan *UDPConnection
-
+	a    chan *Connection
+	b    chan *UDPConnection
+	epfd int
 	stop bool
-	exit chan bool
+	tun  int
 }
 
 // New ...
@@ -48,11 +46,31 @@ func New(fd int) (*Stack, error) {
 		return nil, err
 	}
 
-	f := os.NewFile((uintptr)(fd), "")
+	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
+	if err != nil {
+		utils.LOG.Println("set socket syscall.IPPROTO_IP failed", err)
+		return nil, err
+	}
+
+	ep, err := syscall.EpollCreate1(0)
+	if err != nil {
+		utils.LOG.Println("epoll_create1:", err.Error())
+		return nil, err
+	}
+
+	err = syscall.EpollCtl(ep, syscall.EPOLL_CTL_ADD, fd, &syscall.EpollEvent{
+		Events: syscall.EPOLLIN | syscall.EPOLLERR, /*| syscall.EPOLL_NONBLOCK  | syscall.EPOLLOUT | syscall.EPOLLET*/
+		Fd:     int32(fd),
+	})
+	if err != nil {
+		utils.LOG.Println("epollctl:", err.Error())
+		syscall.Close(ep)
+		return nil, err
+	}
 
 	v := &Stack{
-		tun: tun.NewTunDevice(f),
-		r:   rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
+		epfd: ep,
+		r:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 		t: &StateTable{
 			table: make(map[string]*State),
 		},
@@ -60,8 +78,8 @@ func New(fd int) (*Stack, error) {
 		u: &StateTable{
 			table: make(map[string]*State),
 		},
-		b:    make(chan *UDPConnection, 20),
-		exit: make(chan bool),
+		b:   make(chan *UDPConnection, 20),
+		tun: fd,
 	}
 
 	return v, nil
@@ -70,76 +88,85 @@ func New(fd int) (*Stack, error) {
 // DefaultBufferSize ...
 var DefaultBufferSize int = ipv4.MTU
 
+const (
+	MaxEpollEvents = 64
+)
+
 // Start ...
 func (s *Stack) Start() {
 	go func() {
-
-		defer func() {
-			s.exit <- true
-		}()
+		var events [MaxEpollEvents]syscall.EpollEvent
 
 		for {
-			if s.stop {
-				utils.LOG.Println("stack exit!!!^^^^^^")
-				break
-			}
-			var buffer = make([]byte, DefaultBufferSize)
-			n, err := s.tun.Read(buffer)
+			nevents, err := syscall.EpollWait(s.epfd, events[:], -1)
 			if err != nil {
-				utils.LOG.Println("read from tun failed:", err)
+				utils.LOG.Println("epoll_wait: ", err, "exit stack!!!!")
 				break
 			}
 
-			utils.LOG.Println(n, "read bytes from tun!!")
+			for ev := 0; ev < nevents; ev++ {
+				if events[ev].Events&syscall.EPOLLERR == syscall.EPOLLERR {
+					s.handleEventPollErr(events[ev])
+				}
 
-			if n < 20 {
-				utils.LOG.Println("ip format is incorrect", n, "bytes")
-				continue
-			}
-
-			ip := ipv4.NewIPv4()
-			err = ip.TryParseBasicHeader(buffer[:20])
-			if err != nil {
-				utils.LOG.Println("parse ip base header failed", err)
-				continue
-			}
-
-			if ip.IsStop() {
-				utils.LOG.Println("IP package stop flag, stack will exit!!! ")
-				break
-			}
-
-			err = ip.TryParseBody(buffer[20:n])
-			if err != nil {
-				utils.LOG.Println("pase ip body failed", err)
-				continue
-			}
-
-			if ip.Flags&0x1 != 0 || ip.FragmentOffset != 0 {
-				utils.LOG.Print("partial packet received")
-				end := ipv4.Merge(ip)
-				if end {
-					ip = ipv4.GetHugPkg(ip.Identification)
-					utils.LOG.Print("partial packets were merged. ", ip.Identification)
-					ip.Dump()
-
-				} else {
-					continue
+				if events[ev].Events&syscall.EPOLLIN == syscall.EPOLLIN {
+					s.handleEventPollIn(events[ev])
 				}
 			}
-
-			switch ip.Protocol {
-			case ipv4.IPProtocolTCP:
-				s.handleTCP(ip)
-			case ipv4.IPProtocolUDP:
-				s.handleUDP(ip)
-			default:
-				ip.Dump()
-			}
-
 		}
 
 	}()
+}
+
+func (s *Stack) handleEventPollIn(event syscall.EpollEvent) {
+
+	buffer := make([]byte, common.CONFIGMTU)
+
+	n, _, err := syscall.Recvfrom(int(event.Fd), buffer, 0)
+	if err != nil {
+		utils.LOG.Println("Could not receive from descriptor: %s", err.Error())
+		return
+	}
+	if n < 20 {
+		utils.LOG.Println("it is not a ip packet!!!", n)
+		return
+	}
+
+	value := buffer[:n]
+
+	ip := ipv4.NewIPv4()
+	err = ip.TryParseBasicHeader(value[:20])
+	if err != nil {
+		utils.LOG.Println("can not parse ip header", err)
+		return
+	}
+
+	err = ip.TryParseBody(value[20:])
+	if err != nil {
+		utils.LOG.Println("failed to parse ip ", err)
+		return
+	}
+
+	if ip.IHL < 5 {
+		utils.LOG.Println("IP header length is invalid.")
+	} else {
+		switch ip.Protocol {
+		case ipv4.IPProtocolTCP /* tcp */ :
+			s.handleTCP(ip)
+		case ipv4.IPProtocolUDP /* udp */ :
+			s.handleUDP(ip)
+		default:
+			utils.LOG.Println("unhandled protocol: ", ip.Protocol.String())
+		}
+	}
+}
+
+func (s *Stack) handleEventPollErr(event syscall.EpollEvent) {
+	if v, err := syscall.GetsockoptInt(int(event.Fd), syscall.SOL_SOCKET, syscall.SO_ERROR); err != nil {
+		utils.LOG.Println("Error", err)
+	} else {
+		utils.LOG.Println("Error val", v)
+	}
 }
 
 func (s *Stack) handleTCP(ip *ipv4.IPv4) {
@@ -159,7 +186,7 @@ func (s *Stack) handleTCP(ip *ipv4.IPv4) {
 
 		if !pkt.SYN {
 			relay := rst(pkt.SrcIP, pkt.DstIP, pkt.SrcPort, pkt.DstPort, pkt.Sequence, pkt.Acknowledgment, uint32(len(pkt.Payload)))
-			s.sendtolow(packtcp(relay), true)
+			s.SendTo(packtcp(relay))
 			return
 		}
 
@@ -227,34 +254,25 @@ func (s *Stack) AcceptUDP() (*UDPConnection, error) {
 	return c, nil
 }
 
-func (s *Stack) sendtolow(b []byte, sync bool) {
-	if !sync {
-		go func() {
-			_, err := s.tun.Write(b)
-			if err != nil {
-				utils.LOG.Println("write to tun failed", err)
-			}
-		}()
+// SendTo ...
+func (s *Stack) SendTo(data []byte) error {
 
-	} else {
-		_, err := s.tun.Write(b)
-		if err != nil {
-			utils.LOG.Println("write to tun failed", err)
-		}
+	to := &syscall.SockaddrInet4{Port: int(0), Addr: [4]byte{data[16], data[17], data[18], data[19]}} //[4]byte{dest[0], dest[1], dest[2], dest[
+	err := syscall.Sendto((int(s.tun)), data, 0, to)
+	if err != nil {
+		utils.LOG.Println(fmt.Sprintf("Error: %s %d\n", err.Error(), len(data)))
+		return err
 	}
+	return nil
 }
 
 // Close ...
 func (s *Stack) Close() {
-	o, err := net.Dial("tcp", "11.11.11.11:11111")
-	if err == nil {
-		o.Close()
-	}
-
 	s.stop = true
-	s.tun.SetStop(true)
-	<-s.exit
-	close(s.exit)
+	syscall.Close(s.epfd)
+	syscall.Close(s.tun)
+	s.epfd = 0
+	s.tun = 0
 	time.Sleep(time.Second * 2)
 	if s.a != nil {
 		close(s.a)
@@ -274,10 +292,6 @@ func (s *Stack) Close() {
 		s.u.ClearAll()
 	}
 
-	if s.tun != nil {
-		s.tun.Close()
-		s.tun = nil
-	}
 	s.t = nil
 	s.u = nil
 	s.buffer = nil
