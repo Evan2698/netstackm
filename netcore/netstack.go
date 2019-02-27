@@ -40,17 +40,17 @@ type Stack struct {
 // New ...
 func New(fd int) (*Stack, error) {
 
-	err := syscall.SetNonblock(fd, true)
+	/*err := syscall.SetNonblock(fd, true)
 	if err != nil {
 		utils.LOG.Println("set socket option non-block failed", err)
 		return nil, err
 	}
 
-	err = syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
+	err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_HDRINCL, 1)
 	if err != nil {
 		utils.LOG.Println("set socket syscall.IPPROTO_IP failed", err)
 		return nil, err
-	}
+	}*/
 
 	ep, err := syscall.EpollCreate1(0)
 	if err != nil {
@@ -59,7 +59,7 @@ func New(fd int) (*Stack, error) {
 	}
 
 	err = syscall.EpollCtl(ep, syscall.EPOLL_CTL_ADD, fd, &syscall.EpollEvent{
-		Events: syscall.EPOLLIN | syscall.EPOLLERR, /*| syscall.EPOLL_NONBLOCK  | syscall.EPOLLOUT | syscall.EPOLLET*/
+		Events: syscall.EPOLLIN | syscall.EPOLLERR, /*| syscall.EPOLL_NONBLOCK,  | syscall.EPOLLOUT | syscall.EPOLLET*/
 		Fd:     int32(fd),
 	})
 	if err != nil {
@@ -122,9 +122,9 @@ func (s *Stack) handleEventPollIn(event syscall.EpollEvent) {
 
 	buffer := make([]byte, common.CONFIGMTU)
 
-	n, _, err := syscall.Recvfrom(int(event.Fd), buffer, 0)
+	n, err := syscall.Read(int(event.Fd), buffer)
 	if err != nil {
-		utils.LOG.Println("Could not receive from descriptor: %s", err.Error())
+		utils.LOG.Println("Could not receive from descriptor:", err)
 		return
 	}
 	if n < 20 {
@@ -257,10 +257,10 @@ func (s *Stack) AcceptUDP() (*UDPConnection, error) {
 // SendTo ...
 func (s *Stack) SendTo(data []byte) error {
 
-	to := &syscall.SockaddrInet4{Port: int(0), Addr: [4]byte{data[16], data[17], data[18], data[19]}} //[4]byte{dest[0], dest[1], dest[2], dest[
-	err := syscall.Sendto((int(s.tun)), data, 0, to)
+	//to := &syscall.SockaddrInet4{Port: int(0), Addr: [4]byte{data[16], data[17], data[18], data[19]}} //[4]byte{dest[0], dest[1], dest[2], dest[
+	n, err := syscall.Write(int(s.tun), data)
 	if err != nil {
-		utils.LOG.Println(fmt.Sprintf("Error: %s %d\n", err.Error(), len(data)))
+		utils.LOG.Println(fmt.Sprintf("Error: %s %d\n", err.Error(), len(data)), n)
 		return err
 	}
 	return nil

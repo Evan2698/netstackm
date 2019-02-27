@@ -288,9 +288,9 @@ func (t *TCP) Dump() {
 	utils.LOG.Println("offset", t.Offset, ":", "NS", t.NS)
 	utils.LOG.Println("CWR", t.CWR, ":", "ECE", t.ECE, ":", "URG", t.URG, ":ACK", t.ACK, ":PSH", t.PSH, ":RST", t.RST, ":SYN", t.SYN, ":FIN", t.FIN)
 	utils.LOG.Println("WSIZE", t.WndSize, ":CHECKSUM", t.Sum, ":", "urgent", t.Urgent)
-	for _, k := range t.Options {
-		k.Dump()
-	}
+	//for _, k := range t.Options {
+	//	k.Dump()
+	//}
 	utils.LOG.Println("payload size: ", len(t.Payload), t.Payload)
 	utils.LOG.Println("-----------------------------------------")
 }

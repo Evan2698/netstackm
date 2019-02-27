@@ -71,13 +71,15 @@ func (c *Connection) Read(b []byte) (n int, err error) {
 	}
 
 	select {
-	case <-time.After(300 * time.Second):
+	case <-time.After(60 * time.Minute):
 		fmt.Println("Timeout occured")
 		return 0, errors.New("Timeout occured.")
 	case _, ok := <-c.Recv:
 		if !ok {
 			// connection closed?
-			return 0, io.EOF
+			if len(c.buffer) == 0 {
+				return 0, io.EOF
+			}
 		}
 		state.lockObject.Lock()
 		n = copy(b[:], c.buffer[:])
@@ -168,11 +170,6 @@ func (c *Connection) run(t *tcp.TCP) {
 	utils.LOG.Println("connection: ",
 		common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort),
 		"current state: ", c.current.SocketState.String())
-
-	utils.LOG.Println("================================ begin")
-	t.Dump()
-	c.current.Dump()
-	utils.LOG.Println("================================ end !!")
 
 	c.updateWindow(t)
 
@@ -379,8 +376,8 @@ func (c *Connection) handleSynRecived(t *tcp.TCP) {
 		state.Conn.buffer = append(state.Conn.buffer, t.Payload[:]...)
 	}
 
-	//ac := ack(state)
-	//c.Stack.sendtolow(packtcp(ac), true)
+	ac := ack(state)
+	c.Stack.SendTo(packtcp(ac))
 	state.RecvNext = state.RecvNext + uint32(pl)
 	state.SocketState = SocketEstablished
 	c.Stack.a <- c
@@ -414,7 +411,9 @@ func (c *Connection) dispatch(t *tcp.TCP) {
 //Close ...
 func (c *Connection) Close() {
 	utils.LOG.Print("close function was called by caller..")
-	c.notifyclose()
+	if !c.closed {
+		c.notifyclose()
+	}
 	select {
 	case c.Recv <- true:
 	default:
@@ -424,10 +423,7 @@ func (c *Connection) Close() {
 	state := c.current
 	state.lockObject.Lock()
 	defer state.lockObject.Unlock()
-
-	c.buffer = nil
-	c.Stack = nil
-	c.Recv = nil
+	close(c.Recv)
 	utils.LOG.Println(common.GenerateUniqueKey(c.Src, c.Dst, c.SourcePort, c.DestinationPort), "TCP connection exit!!!!!")
 }
 

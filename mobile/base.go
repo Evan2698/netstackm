@@ -54,7 +54,10 @@ func StartService(fd int, proxy string, dns string) bool {
 }
 
 func handTCPConnection(c *netcore.Connection, url string) {
-	defer c.Close()
+	defer func(con *netcore.Connection) {
+		utils.LOG.Println("disconstructor!!!!")
+		con.Close()
+	}(c)
 
 	utils.LOG.Println("proxy", url)
 	dialer, err := proxy.SOCKS5("tcp", url, nil, proxy.Direct)
@@ -72,20 +75,23 @@ func handTCPConnection(c *netcore.Connection, url string) {
 		return
 	}
 
-	defer con.Close()
+	defer func(c net.Conn) {
+		c.Close()
+	}(con)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 
 	go func() {
 		defer wg.Done()
-		var sz [1400]byte
+		var sz = make([]byte, 1460)
 		for {
-			n, err := con.Read(sz[:])
+			n, err := con.Read(sz)
 			if err != nil {
 				utils.LOG.Print("read proxy failed", err)
 				break
 			}
+			utils.LOG.Println("LENGTH OF RECV: ", n)
 			_, err = c.Write(sz[:n])
 			if err != nil {
 				utils.LOG.Print("write tun failed", err)
@@ -94,25 +100,24 @@ func handTCPConnection(c *netcore.Connection, url string) {
 		}
 
 	}()
-	var buffer [1400]byte
+	var buffer = make([]byte, 1460)
 	for {
-		n, err := c.Read(buffer[:])
+		n, err := c.Read(buffer)
 		if err != nil {
 			utils.LOG.Print("exit", err)
 			break
 		}
-		utils.LOG.Println("TCP DATA:", buffer[:n])
+		utils.LOG.Println("Length of TCP DATA: ", n)
 		_, err = con.Write(buffer[:n])
 		if err != nil {
 			utils.LOG.Print("proxy write error", err)
 			break
 		}
-
 	}
 
 	wg.Wait()
+	time.Sleep(time.Second * 2)
 	utils.LOG.Println("TCP exit!!!!")
-
 }
 
 var gcache = dns.NewDNSCache()
