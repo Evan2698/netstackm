@@ -63,13 +63,15 @@ func (c *UDPConnection) Read(b []byte) (n int, err error) {
 	}
 
 	select {
-	case <-time.After(30 * time.Second):
+	case <-time.After(300 * time.Second):
 		utils.LOG.Println("Timeout occured")
 		return 0, errors.New("Timeout occured")
 	case _, ok := <-c.Recv:
 		if !ok {
 			// connection closed?
-			return 0, io.EOF
+			if c.cache.Len() == 0 {
+				return 0, io.EOF
+			}
 		}
 		state.lockObject.Lock()
 		if c.cache.Len() > 0 {
@@ -215,12 +217,7 @@ func (c *UDPConnection) Close() {
 	c.handleClose()
 	u := udp.NewUDP()
 	u.Stop = true
-	if c.Recv != nil {
-		close(c.Recv)
-	}
-	c.Recv = nil
-	c.Stack = nil
-	c.current = nil
+	close(c.Recv)
 }
 
 // NewUDPConnection ..
