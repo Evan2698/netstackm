@@ -261,9 +261,9 @@ func (s *Stack) SendTo(data []byte) error {
 	err := s.send(data)
 
 	// asynchronous send again, to avoid lost packet
-	go func(ss *Stack, d []byte) {
+	/*go func(ss *Stack, d []byte) {
 		s.send(d)
-	}(s, data)
+	}(s, data)*/
 
 	return err
 }
