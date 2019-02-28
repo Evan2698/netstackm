@@ -151,7 +151,7 @@ func handUDPConnection(c *netcore.UDPConnection, url string, dns string) {
 		return
 	}
 
-	utils.LOG.Print("UDP READ: ", buf[:n])
+	utils.LOG.Print("UDP READ: ", n)
 
 	if strings.Contains(c.RemoteAddr().String(), dns) {
 		answer := gcache.Query(buf[:n])
