@@ -258,6 +258,17 @@ func (s *Stack) AcceptUDP() (*UDPConnection, error) {
 func (s *Stack) SendTo(data []byte) error {
 
 	//to := &syscall.SockaddrInet4{Port: int(0), Addr: [4]byte{data[16], data[17], data[18], data[19]}} //[4]byte{dest[0], dest[1], dest[2], dest[
+	err := s.send(data)
+
+	// asynchronous send again, to avoid lost packet
+	go func(ss *Stack, d []byte) {
+		s.send(d)
+	}(s, data)
+
+	return err
+}
+
+func (s *Stack) send(data []byte) error {
 	n, err := syscall.Write(int(s.tun), data)
 	if err != nil {
 		utils.LOG.Println(fmt.Sprintf("Error: %s %d\n", err.Error(), len(data)), n)
