@@ -74,11 +74,11 @@ func New(fd int) (*Stack, error) {
 		t: &StateTable{
 			table: make(map[string]*State),
 		},
-		a: make(chan *Connection, 20),
+		a: make(chan *Connection, 50),
 		u: &StateTable{
 			table: make(map[string]*State),
 		},
-		b:   make(chan *UDPConnection, 20),
+		b:   make(chan *UDPConnection, 50),
 		tun: fd,
 	}
 
@@ -282,29 +282,9 @@ func (s *Stack) Close() {
 	s.stop = true
 	syscall.Close(s.epfd)
 	syscall.Close(s.tun)
-	s.epfd = 0
-	s.tun = 0
 	time.Sleep(time.Second * 2)
-	if s.a != nil {
-		close(s.a)
-		s.a = nil
-	}
-
-	if s.b != nil {
-		close(s.b)
-		s.b = nil
-	}
-
-	if s.t != nil {
-		s.t.ClearAll()
-	}
-
-	if s.u != nil {
-		s.u.ClearAll()
-	}
-
-	s.t = nil
-	s.u = nil
-	s.buffer = nil
-	s.sendQueue = nil
+	close(s.a)
+	close(s.b)
+	s.t.ClearAll()
+	s.u.ClearAll()
 }
