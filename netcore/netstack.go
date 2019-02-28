@@ -3,7 +3,9 @@ package netcore
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -34,7 +36,7 @@ type Stack struct {
 	b    chan *UDPConnection
 	epfd int
 	stop bool
-	tun  int
+	tun  io.ReadWriteCloser
 }
 
 // New ...
@@ -52,24 +54,26 @@ func New(fd int) (*Stack, error) {
 		return nil, err
 	}*/
 
-	ep, err := syscall.EpollCreate1(0)
-	if err != nil {
-		utils.LOG.Println("epoll_create1:", err.Error())
-		return nil, err
-	}
+	//ep, err := syscall.EpollCreate1(0)
+	//if err != nil {
+	//	utils.LOG.Println("epoll_create1:", err.Error())
+	//	return nil, err
+	//}
 
-	err = syscall.EpollCtl(ep, syscall.EPOLL_CTL_ADD, fd, &syscall.EpollEvent{
-		Events: syscall.EPOLLIN | syscall.EPOLLERR, /*| syscall.EPOLL_NONBLOCK,  | syscall.EPOLLOUT | syscall.EPOLLET*/
-		Fd:     int32(fd),
-	})
-	if err != nil {
+	//err = syscall.EpollCtl(ep, syscall.EPOLL_CTL_ADD, fd, &syscall.EpollEvent{
+	//	Events: syscall.EPOLLIN | syscall.EPOLLERR, /*| syscall.EPOLL_NONBLOCK,  | syscall.EPOLLOUT | syscall.EPOLLET*/
+	//	Fd:     int32(fd),
+	//})
+	/*if err != nil {
 		utils.LOG.Println("epollctl:", err.Error())
 		syscall.Close(ep)
 		return nil, err
-	}
+	}*/
+
+	f := os.NewFile(uintptr(fd), "")
 
 	v := &Stack{
-		epfd: ep,
+		epfd: 0,
 		r:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 		t: &StateTable{
 			table: make(map[string]*State),
@@ -79,7 +83,7 @@ func New(fd int) (*Stack, error) {
 			table: make(map[string]*State),
 		},
 		b:   make(chan *UDPConnection, 50),
-		tun: fd,
+		tun: f,
 	}
 
 	return v, nil
@@ -94,7 +98,7 @@ const (
 
 // Start ...
 func (s *Stack) Start() {
-	go func() {
+	/*go func() {
 		var events [MaxEpollEvents]syscall.EpollEvent
 
 		for {
@@ -115,36 +119,50 @@ func (s *Stack) Start() {
 			}
 		}
 
+	}()*/
+
+	go func() {
+
+		for {
+			buffer := make([]byte, common.CONFIGMTU)
+			n, err := s.tun.Read(buffer)
+			if err != nil {
+				utils.LOG.Println("Could not receive from descriptor:", err)
+				break
+			}
+			value := buffer[:n]
+			go func() {
+				s.handleEventPollIn(value)
+			}()
+		}
 	}()
 }
 
-func (s *Stack) handleEventPollIn(event syscall.EpollEvent) {
+func (s *Stack) handleEventPollIn(value []byte) error {
 
-	buffer := make([]byte, common.CONFIGMTU)
+	/*buffer := make([]byte, common.CONFIGMTU)
 
 	n, err := syscall.Read(int(event.Fd), buffer)
 	if err != nil {
 		utils.LOG.Println("Could not receive from descriptor:", err)
-		return
+		return err
 	}
 	if n < 20 {
 		utils.LOG.Println("it is not a ip packet!!!", n)
-		return
-	}
-
-	value := buffer[:n]
+		return nil
+	}*/
 
 	ip := ipv4.NewIPv4()
-	err = ip.TryParseBasicHeader(value[:20])
+	err := ip.TryParseBasicHeader(value[:20])
 	if err != nil {
 		utils.LOG.Println("can not parse ip header", err)
-		return
+		return nil
 	}
 
 	err = ip.TryParseBody(value[20:])
 	if err != nil {
 		utils.LOG.Println("failed to parse ip ", err)
-		return
+		return nil
 	}
 
 	if ip.IHL < 5 {
@@ -159,6 +177,8 @@ func (s *Stack) handleEventPollIn(event syscall.EpollEvent) {
 			utils.LOG.Println("unhandled protocol: ", ip.Protocol.String())
 		}
 	}
+
+	return nil
 }
 
 func (s *Stack) handleEventPollErr(event syscall.EpollEvent) {
@@ -269,7 +289,7 @@ func (s *Stack) SendTo(data []byte) error {
 }
 
 func (s *Stack) send(data []byte) error {
-	n, err := syscall.Write(int(s.tun), data)
+	n, err := s.tun.Write(data)
 	if err != nil {
 		utils.LOG.Println(fmt.Sprintf("Error: %s %d\n", err.Error(), len(data)), n)
 		return err
@@ -281,7 +301,7 @@ func (s *Stack) send(data []byte) error {
 func (s *Stack) Close() {
 	s.stop = true
 	syscall.Close(s.epfd)
-	syscall.Close(s.tun)
+	s.tun.Close()
 	time.Sleep(time.Second * 2)
 	close(s.a)
 	close(s.b)
